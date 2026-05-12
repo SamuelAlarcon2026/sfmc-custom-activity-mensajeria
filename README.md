@@ -19,6 +19,34 @@ La actividad:
   - `No enviado`
 - Devuelve outArguments para registrar errores y respuesta del proveedor.
 
+
+## Diferencia entre Success y Enviado
+
+En Journey Builder, el contador `Successes` significa que el endpoint `/execute` respondió correctamente a SFMC con HTTP 200. No significa necesariamente que BITMessage haya enviado el SMS.
+
+La decisión real de la rama se devuelve ahora de forma explícita con:
+
+```json
+{
+  "outcome": "no_enviado",
+  "branchResult": "no_enviado",
+  "messageStatus": "ERROR",
+  "errorCode": "TIMEOUT"
+}
+```
+
+o:
+
+```json
+{
+  "outcome": "enviado",
+  "branchResult": "enviado",
+  "messageStatus": "ENVIADO"
+}
+```
+
+Esto evita que Journey Builder tome la primera rama por defecto cuando el proveedor no responde o devuelve error.
+
 ## Payload enviado a BITMessage
 
 La actividad llama a BITMessage con `POST` y este body:

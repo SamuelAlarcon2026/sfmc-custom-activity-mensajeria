@@ -194,6 +194,7 @@ function buildConfig() {
           { campanyaReferencia: '' }
         ],
         outArguments: [
+          { outcome: '' },
           { branchResult: '' },
           { messageStatus: '' },
           { providerMessageId: '' },
@@ -251,6 +252,7 @@ function buildConfig() {
         key: 'enviado',
         displayName: 'Enviado',
         arguments: {
+          outcome: 'enviado',
           branchResult: 'enviado'
         },
         metaData: {
@@ -261,6 +263,7 @@ function buildConfig() {
         key: 'no_enviado',
         displayName: 'No enviado',
         arguments: {
+          outcome: 'no_enviado',
           branchResult: 'no_enviado'
         },
         metaData: {
@@ -303,6 +306,11 @@ function buildConfig() {
           ],
           outArguments: [
             {
+              outcome: {
+                dataType: 'Text',
+                direction: 'out',
+                access: 'visible'
+              },
               branchResult: {
                 dataType: 'Text',
                 direction: 'out',
@@ -598,9 +606,38 @@ function validateServerConfiguration() {
   return errors;
 }
 
-function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
+function buildExecuteResponse(branchResult, values = {}) {
+  /*
+    Journey Builder muestra "Success" cuando /execute responde HTTP 200.
+    Para enrutar a una salida concreta, devolvemos la decisión de dos formas:
+    - outcome: clave de la rama definida en config.json
+    - branchResult: valor usado por los outcomes.arguments
+
+    Además incluimos outArguments para que el payload sea compatible con tenants
+    que esperan las salidas explícitamente en ese formato.
+  */
+  const output = {
+    outcome: branchResult,
+    branchResult,
+    messageStatus: values.messageStatus || '',
+    providerMessageId: values.providerMessageId || '',
+    providerOperatorCode: values.providerOperatorCode || '',
+    errorCode: values.errorCode || '',
+    errorMessage: values.errorMessage || '',
+    providerResponse: values.providerResponse || '',
+    phoneSent: values.phoneSent || '',
+    campaignReference: values.campaignReference || '',
+    sentAt: values.sentAt || new Date().toISOString()
+  };
+
   return {
-    branchResult: 'no_enviado',
+    ...output,
+    outArguments: [output]
+  };
+}
+
+function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
+  return buildExecuteResponse('no_enviado', {
     messageStatus: error.providerStatus || 'ERROR',
     providerMessageId: error.providerMessageId || '',
     providerOperatorCode: error.providerOperatorCode || '',
@@ -610,7 +647,7 @@ function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
     phoneSent: error.phoneSent || '',
     campaignReference: error.campaignReference || '',
     sentAt: new Date().toISOString()
-  };
+  });
 }
 
 async function sendBitmessage({ to, message, campanyaReferencia }) {
@@ -864,8 +901,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       campanyaReferencia
     });
 
-    return res.status(200).json({
-      branchResult: 'enviado',
+    return res.status(200).json(buildExecuteResponse('enviado', {
       messageStatus: result.providerStatus || 'ENVIADO',
       providerMessageId: result.providerMessageId,
       providerOperatorCode: result.providerOperatorCode,
@@ -875,7 +911,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       phoneSent: result.phoneSent,
       campaignReference: result.campaignReference,
       sentAt: result.sentAt || new Date().toISOString()
-    });
+    }));
   } catch (error) {
     return res.status(200).json(providerErrorPayload(error));
   }
