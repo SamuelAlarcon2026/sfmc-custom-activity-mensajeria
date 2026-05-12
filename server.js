@@ -402,6 +402,33 @@ app.get('/debug/config', (req, res) => {
     ].join('\n'));
 });
 
+app.get('/debug/sample-execute-response', (req, res) => {
+  const branch = String(req.query.branch || 'no_enviado') === 'enviado' ? 'enviado' : 'no_enviado';
+
+  const sample = buildExecuteResponse(branch, branch === 'enviado'
+    ? {
+        messageStatus: 'ENVIADO',
+        providerMessageId: 'sample-id',
+        providerOperatorCode: 'sample-operator-code',
+        phoneSent: '34644614672',
+        campaignReference: 'PRE-IBSALUT',
+        sentAt: new Date().toISOString()
+      }
+    : {
+        messageStatus: 'ERROR',
+        errorCode: 'TIMEOUT',
+        errorMessage: 'Respuesta de ejemplo para probar que branchResult se devuelve correctamente.',
+        phoneSent: '34644614672',
+        campaignReference: 'PRE-IBSALUT',
+        sentAt: new Date().toISOString()
+      });
+
+  res
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .send(JSON.stringify(sample, null, 2));
+});
+
 const rawBodyParser = express.text({
   type: '*/*',
   limit: '2mb'
@@ -608,17 +635,24 @@ function validateServerConfiguration() {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Journey Builder muestra "Success" cuando /execute responde HTTP 200.
-    Para enrutar a una salida concreta, devolvemos la decisión de dos formas:
-    - outcome: clave de la rama definida en config.json
-    - branchResult: valor usado por los outcomes.arguments
+    Journey Builder marca la actividad como Success cuando /execute responde HTTP 200.
+    El enrutamiento de las ramas se decide mediante el outArgument branchResult.
 
-    Además incluimos outArguments para que el payload sea compatible con tenants
-    que esperan las salidas explícitamente en ese formato.
+    Algunos tenants leen los outArguments desde el cuerpo raíz:
+      { "branchResult": "no_enviado" }
+
+    Otros validan el array outArguments:
+      { "outArguments": [{ "branchResult": "no_enviado" }] }
+
+    Por compatibilidad, devolvemos ambos formatos y repetimos cada salida como
+    objeto individual dentro de outArguments. Así evitamos el hard error:
+    "The REST response does not contain a required outArgument (branchResult)".
   */
+  const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
+
   const output = {
-    outcome: branchResult,
-    branchResult,
+    outcome: normalizedBranchResult,
+    branchResult: normalizedBranchResult,
     messageStatus: values.messageStatus || '',
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
@@ -632,8 +666,35 @@ function buildExecuteResponse(branchResult, values = {}) {
 
   return {
     ...output,
-    outArguments: [output]
+    outArguments: [
+      { branchResult: output.branchResult },
+      { outcome: output.outcome },
+      { messageStatus: output.messageStatus },
+      { providerMessageId: output.providerMessageId },
+      { providerOperatorCode: output.providerOperatorCode },
+      { errorCode: output.errorCode },
+      { errorMessage: output.errorMessage },
+      { providerResponse: output.providerResponse },
+      { phoneSent: output.phoneSent },
+      { campaignReference: output.campaignReference },
+      { sentAt: output.sentAt }
+    ]
   };
+}
+
+function sendExecuteJson(res, payload, reason = '') {
+  console.log('[execute-response]', JSON.stringify({
+    branchResult: payload.branchResult,
+    messageStatus: payload.messageStatus,
+    errorCode: payload.errorCode,
+    reason
+  }));
+
+  return res
+    .status(200)
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .json(payload);
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
@@ -868,7 +929,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       el contacto al camino de error. Un 500 puede provocar retry/fallo de actividad
       en lugar de avanzar por la rama.
     */
-    return res.status(200).json(providerErrorPayload(error, 'JWT_ERROR'));
+    return sendExecuteJson(res, providerErrorPayload(error, 'JWT_ERROR'), 'jwt-error');
   }
 
   const args = mergeInArguments(payload.inArguments || payload?.arguments?.execute?.inArguments || []);
@@ -877,21 +938,21 @@ app.post('/execute', rawBodyParser, async (req, res) => {
   const campanyaReferencia = String(args.campanyaReferencia || BITMESSAGE_CAMPANYA_REFERENCIA || '').trim();
 
   if (!to) {
-    return res.status(200).json(providerErrorPayload(
+    return sendExecuteJson(res, providerErrorPayload(
       Object.assign(new Error('El campo destino/teléfono llegó vacío.'), { code: 'MISSING_TO' })
-    ));
+    ), 'missing-to');
   }
 
   if (!message) {
-    return res.status(200).json(providerErrorPayload(
+    return sendExecuteJson(res, providerErrorPayload(
       Object.assign(new Error('El mensaje llegó vacío.'), { code: 'MISSING_MESSAGE' })
-    ));
+    ), 'missing-message');
   }
 
   if (!campanyaReferencia) {
-    return res.status(200).json(providerErrorPayload(
+    return sendExecuteJson(res, providerErrorPayload(
       Object.assign(new Error('La referencia de campaña de BITMessage llegó vacía.'), { code: 'MISSING_CAMPANYA_REFERENCIA' })
-    ));
+    ), 'missing-campanya-referencia');
   }
 
   try {
@@ -901,7 +962,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       campanyaReferencia
     });
 
-    return res.status(200).json(buildExecuteResponse('enviado', {
+    return sendExecuteJson(res, buildExecuteResponse('enviado', {
       messageStatus: result.providerStatus || 'ENVIADO',
       providerMessageId: result.providerMessageId,
       providerOperatorCode: result.providerOperatorCode,
@@ -911,9 +972,9 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       phoneSent: result.phoneSent,
       campaignReference: result.campaignReference,
       sentAt: result.sentAt || new Date().toISOString()
-    }));
+    }), 'bitmessage-enviado');
   } catch (error) {
-    return res.status(200).json(providerErrorPayload(error));
+    return sendExecuteJson(res, providerErrorPayload(error), error.code || 'bitmessage-error');
   }
 });
 
