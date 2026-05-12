@@ -363,3 +363,34 @@ Cambios aplicados:
 - La configuración incompleta de BITMessage ya no rompe la publicación de la Journey; si en ejecución falta algo, el contacto se enruta por `No enviado` con `errorCode` y `errorMessage`.
 
 Después de subir esta versión a Render, usa **Manual Deploy > Clear build cache & deploy** y vuelve a arrastrar la actividad al canvas para que Journey Builder lea el nuevo `config.json`.
+
+
+## Nota sobre ramas y errores de envío
+
+Esta versión usa `branchResult` como `outArgument` obligatorio en un único objeto dentro de `outArguments`:
+
+```json
+{
+  "branchResult": "no_enviado",
+  "outArguments": [
+    {
+      "branchResult": "no_enviado",
+      "messageStatus": "ERROR",
+      "errorCode": "TIMEOUT"
+    }
+  ]
+}
+```
+
+Regla de negocio implementada:
+
+- `ENVIADO` o `CONFIRMADO` desde BITMessage -> rama `Enviado`.
+- `ERROR` desde BITMessage -> rama `No enviado`.
+- Timeout, error HTTP, JWT inválido, teléfono vacío, campaña vacía o cualquier excepción -> rama `No enviado`.
+
+Para verificar que Render tiene esta versión desplegada:
+
+```text
+https://TU-SERVICIO.onrender.com/debug/version
+https://TU-SERVICIO.onrender.com/debug/sample-execute-response?branch=no_enviado
+```

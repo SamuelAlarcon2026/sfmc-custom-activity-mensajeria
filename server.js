@@ -14,6 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
+const APP_VERSION = '2026-05-12-branch-safe-v2';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -137,11 +138,25 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     ok: true,
     service: 'sfmc-bitmessage-custom-activity',
+    version: APP_VERSION,
     provider: 'BITMessage Fundacio BIT',
     baseUrl: BASE_URL,
     nodeEnv: process.env.NODE_ENV || '',
     timestamp: new Date().toISOString()
   });
+});
+
+app.get('/debug/version', (req, res) => {
+  res
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .json({
+      version: APP_VERSION,
+      outArgumentsShape: 'single-object',
+      requiredBranchResult: true,
+      safeFallbackBranch: 'no_enviado',
+      timestamp: new Date().toISOString()
+    });
 });
 
 // Ruta explícita para Journey Builder. Evita ambigüedad con `/` en iframes.
@@ -193,18 +208,26 @@ function buildConfig() {
           { message: '' },
           { campanyaReferencia: '' }
         ],
+        /*
+          IMPORTANTE:
+          Journey Builder valida los outArguments como un único objeto.
+          Si se devuelven como objetos separados, algunos tenants pueden marcar:
+          "The REST response does not contain a required outArgument (branchResult)".
+        */
         outArguments: [
-          { outcome: '' },
-          { branchResult: '' },
-          { messageStatus: '' },
-          { providerMessageId: '' },
-          { providerOperatorCode: '' },
-          { errorCode: '' },
-          { errorMessage: '' },
-          { providerResponse: '' },
-          { phoneSent: '' },
-          { campaignReference: '' },
-          { sentAt: '' }
+          {
+            outcome: '',
+            branchResult: '',
+            messageStatus: '',
+            providerMessageId: '',
+            providerOperatorCode: '',
+            errorCode: '',
+            errorMessage: '',
+            providerResponse: '',
+            phoneSent: '',
+            campaignReference: '',
+            sentAt: ''
+          }
         ],
         url: `${BASE_URL}/execute`,
         verb: 'POST',
@@ -380,6 +403,7 @@ app.get('/debug/config', (req, res) => {
   res
     .type('text/plain')
     .send([
+      `APP_VERSION=${APP_VERSION}`,
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
@@ -635,18 +659,18 @@ function validateServerConfiguration() {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Journey Builder marca la actividad como Success cuando /execute responde HTTP 200.
-    El enrutamiento de las ramas se decide mediante el outArgument branchResult.
+    Reglas de negocio:
+    - Cualquier error de envío, incluido TIMEOUT, debe ir a No enviado.
+    - Solo un estado ENVIADO/CONFIRMADO válido de BITMessage debe ir a Enviado.
 
-    Algunos tenants leen los outArguments desde el cuerpo raíz:
-      { "branchResult": "no_enviado" }
-
-    Otros validan el array outArguments:
-      { "outArguments": [{ "branchResult": "no_enviado" }] }
-
-    Por compatibilidad, devolvemos ambos formatos y repetimos cada salida como
-    objeto individual dentro de outArguments. Así evitamos el hard error:
-    "The REST response does not contain a required outArgument (branchResult)".
+    Requisito técnico Journey Builder:
+    El outArgument branchResult debe existir siempre dentro de outArguments.
+    Para evitar el hard error:
+      "The REST response does not contain a required outArgument (branchResult)"
+    devolvemos:
+      1) branchResult en el cuerpo raíz, para compatibilidad.
+      2) outArguments como array con UN SOLO objeto que contiene todos los outArguments.
+         Este formato es el más estable en Journey Builder.
   */
   const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
 
@@ -667,24 +691,29 @@ function buildExecuteResponse(branchResult, values = {}) {
   return {
     ...output,
     outArguments: [
-      { branchResult: output.branchResult },
-      { outcome: output.outcome },
-      { messageStatus: output.messageStatus },
-      { providerMessageId: output.providerMessageId },
-      { providerOperatorCode: output.providerOperatorCode },
-      { errorCode: output.errorCode },
-      { errorMessage: output.errorMessage },
-      { providerResponse: output.providerResponse },
-      { phoneSent: output.phoneSent },
-      { campaignReference: output.campaignReference },
-      { sentAt: output.sentAt }
+      {
+        outcome: output.outcome,
+        branchResult: output.branchResult,
+        messageStatus: output.messageStatus,
+        providerMessageId: output.providerMessageId,
+        providerOperatorCode: output.providerOperatorCode,
+        errorCode: output.errorCode,
+        errorMessage: output.errorMessage,
+        providerResponse: output.providerResponse,
+        phoneSent: output.phoneSent,
+        campaignReference: output.campaignReference,
+        sentAt: output.sentAt
+      }
     ]
   };
 }
 
 function sendExecuteJson(res, payload, reason = '') {
   console.log('[execute-response]', JSON.stringify({
+    appVersion: APP_VERSION,
     branchResult: payload.branchResult,
+    outArgumentsBranchResult: payload?.outArguments?.[0]?.branchResult,
+    outArgumentsShape: Array.isArray(payload.outArguments) ? `array:${payload.outArguments.length}` : typeof payload.outArguments,
     messageStatus: payload.messageStatus,
     errorCode: payload.errorCode,
     reason
@@ -918,7 +947,48 @@ app.post('/stop', rawBodyParser, (req, res) => {
   });
 });
 
+
+function createExecuteResponder(res) {
+  let responded = false;
+
+  return {
+    hasResponded() {
+      return responded || res.headersSent;
+    },
+    send(payload, reason) {
+      if (responded || res.headersSent) {
+        console.warn('[execute-response-skipped]', JSON.stringify({
+          appVersion: APP_VERSION,
+          reason,
+          branchResult: payload?.branchResult
+        }));
+        return;
+      }
+
+      responded = true;
+      return sendExecuteJson(res, payload, reason);
+    }
+  };
+}
+
 app.post('/execute', rawBodyParser, async (req, res) => {
+  const executeResponder = createExecuteResponder(res);
+
+  /*
+    Último cinturón de seguridad:
+    Si por cualquier motivo el proceso tarda demasiado, respondemos antes a SFMC
+    con No enviado. Así evitamos perder al contacto por Hard Error.
+  */
+  const safetyTimeoutMs = Math.max(1000, Math.min(SFMC_EXECUTE_TIMEOUT_MS - 5000, BITMESSAGE_API_TIMEOUT_MS + 2000));
+  const safetyTimer = setTimeout(() => {
+    executeResponder.send(buildExecuteResponse('no_enviado', {
+      messageStatus: 'ERROR',
+      errorCode: 'EXECUTE_SAFETY_TIMEOUT',
+      errorMessage: `La Custom Activity agotó el tiempo seguro de ejecución (${safetyTimeoutMs} ms) y enruta a No enviado.`,
+      sentAt: new Date().toISOString()
+    }), 'execute-safety-timeout');
+  }, safetyTimeoutMs);
+
   let payload;
 
   try {
@@ -929,7 +999,8 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       el contacto al camino de error. Un 500 puede provocar retry/fallo de actividad
       en lugar de avanzar por la rama.
     */
-    return sendExecuteJson(res, providerErrorPayload(error, 'JWT_ERROR'), 'jwt-error');
+    clearTimeout(safetyTimer);
+    return executeResponder.send(providerErrorPayload(error, 'JWT_ERROR'), 'jwt-error');
   }
 
   const args = mergeInArguments(payload.inArguments || payload?.arguments?.execute?.inArguments || []);
@@ -938,19 +1009,22 @@ app.post('/execute', rawBodyParser, async (req, res) => {
   const campanyaReferencia = String(args.campanyaReferencia || BITMESSAGE_CAMPANYA_REFERENCIA || '').trim();
 
   if (!to) {
-    return sendExecuteJson(res, providerErrorPayload(
+    clearTimeout(safetyTimer);
+    return executeResponder.send(providerErrorPayload(
       Object.assign(new Error('El campo destino/teléfono llegó vacío.'), { code: 'MISSING_TO' })
     ), 'missing-to');
   }
 
   if (!message) {
-    return sendExecuteJson(res, providerErrorPayload(
+    clearTimeout(safetyTimer);
+    return executeResponder.send(providerErrorPayload(
       Object.assign(new Error('El mensaje llegó vacío.'), { code: 'MISSING_MESSAGE' })
     ), 'missing-message');
   }
 
   if (!campanyaReferencia) {
-    return sendExecuteJson(res, providerErrorPayload(
+    clearTimeout(safetyTimer);
+    return executeResponder.send(providerErrorPayload(
       Object.assign(new Error('La referencia de campaña de BITMessage llegó vacía.'), { code: 'MISSING_CAMPANYA_REFERENCIA' })
     ), 'missing-campanya-referencia');
   }
@@ -962,7 +1036,8 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       campanyaReferencia
     });
 
-    return sendExecuteJson(res, buildExecuteResponse('enviado', {
+    clearTimeout(safetyTimer);
+    return executeResponder.send(buildExecuteResponse('enviado', {
       messageStatus: result.providerStatus || 'ENVIADO',
       providerMessageId: result.providerMessageId,
       providerOperatorCode: result.providerOperatorCode,
@@ -974,8 +1049,38 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       sentAt: result.sentAt || new Date().toISOString()
     }), 'bitmessage-enviado');
   } catch (error) {
-    return sendExecuteJson(res, providerErrorPayload(error), error.code || 'bitmessage-error');
+    clearTimeout(safetyTimer);
+    return executeResponder.send(providerErrorPayload(error), error.code || 'bitmessage-error');
   }
+});
+
+
+app.use((error, req, res, next) => {
+  console.error('[unhandled-error]', JSON.stringify({
+    appVersion: APP_VERSION,
+    path: req.path,
+    message: error?.message,
+    code: error?.code,
+    stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack
+  }));
+
+  if (req.path === '/execute' && !res.headersSent) {
+    return sendExecuteJson(res, providerErrorPayload(
+      Object.assign(new Error(error?.message || 'Error inesperado en /execute.'), {
+        code: error?.code || 'UNHANDLED_EXECUTE_ERROR'
+      })
+    ), 'unhandled-execute-error');
+  }
+
+  if (!res.headersSent) {
+    return res.status(500).json({
+      success: false,
+      error: 'UNHANDLED_ERROR',
+      message: error?.message || 'Error inesperado.'
+    });
+  }
+
+  return next(error);
 });
 
 app.listen(PORT, () => {
