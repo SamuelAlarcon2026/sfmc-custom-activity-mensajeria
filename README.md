@@ -394,3 +394,43 @@ Para verificar que Render tiene esta versión desplegada:
 https://TU-SERVICIO.onrender.com/debug/version
 https://TU-SERVICIO.onrender.com/debug/sample-execute-response?branch=no_enviado
 ```
+
+
+## Versión 2026-05-12-routing-contract-v3
+
+Esta versión corrige el contrato de respuesta de `/execute` para Journey Builder:
+
+- `/execute` devuelve siempre HTTP 200.
+- La respuesta es JSON plano, con `execute.useJwt=false`.
+- `branchResult` siempre se devuelve dentro de `outArguments[0].branchResult`.
+- Cualquier error, timeout, credenciales inválidas, teléfono inválido o respuesta ERROR de BITMessage se enruta como `no_enviado`.
+- Solo `estado=ENVIADO` o `estado=CONFIRMADO` de BITMessage se enruta como `enviado`.
+
+Ejemplo de respuesta en timeout:
+
+```json
+{
+  "outArguments": [
+    {
+      "branchResult": "no_enviado",
+      "outcome": "no_enviado",
+      "messageStatus": "ERROR",
+      "errorCode": "TIMEOUT",
+      "errorMessage": "Timeout llamando a BITMessage después de 3000 ms.",
+      "providerMessageId": "",
+      "providerOperatorCode": "",
+      "providerResponse": "",
+      "phoneSent": "34644614672",
+      "campaignReference": "PRE-IBSALUT",
+      "sentAt": "2026-05-12T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+Después de desplegar esta versión, elimina la actividad del canvas de Journey Builder y vuelve a arrastrarla para que SFMC lea el nuevo `config.json`.
+
+
+## Versión JWT Secure v4
+
+`/execute` usa `useJwt: true`. Journey Builder firma la petición con el JWT Signing Secret del Installed Package. La respuesta sigue siendo JSON plano con `outArguments`, incluyendo siempre `branchResult`. Cualquier error funcional, timeout de BITMessage o error de proveedor enruta a `no_enviado`; solo `ENVIADO` o `CONFIRMADO` enruta a `enviado`.

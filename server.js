@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-12-branch-safe-v2';
+const APP_VERSION = '2026-05-12-jwt-secure-v4';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -152,7 +152,9 @@ app.get('/debug/version', (req, res) => {
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     .json({
       version: APP_VERSION,
-      outArgumentsShape: 'single-object',
+      executeUseJwt: true,
+      outArgumentsShape: 'array:single-object',
+      responseContract: 'jwt-request-plain-json-omni-outArguments',
       requiredBranchResult: true,
       safeFallbackBranch: 'no_enviado',
       timestamp: new Date().toISOString()
@@ -380,7 +382,7 @@ function buildConfig() {
                 access: 'visible'
               },
               sentAt: {
-                dataType: 'Date',
+                dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
               }
@@ -407,6 +409,7 @@ app.get('/debug/config', (req, res) => {
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
+      `execute.useJwt=true`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
       `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
@@ -659,25 +662,20 @@ function validateServerConfiguration() {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Reglas de negocio:
-    - Cualquier error de envío, incluido TIMEOUT, debe ir a No enviado.
-    - Solo un estado ENVIADO/CONFIRMADO válido de BITMessage debe ir a Enviado.
-
-    Requisito técnico Journey Builder:
-    El outArgument branchResult debe existir siempre dentro de outArguments.
-    Para evitar el hard error:
-      "The REST response does not contain a required outArgument (branchResult)"
-    devolvemos:
-      1) branchResult en el cuerpo raíz, para compatibilidad.
-      2) outArguments como array con UN SOLO objeto que contiene todos los outArguments.
-         Este formato es el más estable en Journey Builder.
+    Contrato seguro para Journey Builder:
+    - /execute responde SIEMPRE HTTP 200 ante errores funcionales o del proveedor.
+    - Cualquier error de envío se convierte en branchResult=no_enviado.
+    - Solo BITMessage estado ENVIADO/CONFIRMADO se convierte en branchResult=enviado.
+    - La petición de SFMC debe venir firmada por JWT.
+    - La respuesta a SFMC es JSON plano con outArguments.
+    - Incluimos branchResult también en raíz para compatibilidad con tenants que validan top-level.
   */
   const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
 
   const output = {
-    outcome: normalizedBranchResult,
     branchResult: normalizedBranchResult,
-    messageStatus: values.messageStatus || '',
+    outcome: normalizedBranchResult,
+    messageStatus: values.messageStatus || (normalizedBranchResult === 'enviado' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
     errorCode: values.errorCode || '',
@@ -691,39 +689,31 @@ function buildExecuteResponse(branchResult, values = {}) {
   return {
     ...output,
     outArguments: [
-      {
-        outcome: output.outcome,
-        branchResult: output.branchResult,
-        messageStatus: output.messageStatus,
-        providerMessageId: output.providerMessageId,
-        providerOperatorCode: output.providerOperatorCode,
-        errorCode: output.errorCode,
-        errorMessage: output.errorMessage,
-        providerResponse: output.providerResponse,
-        phoneSent: output.phoneSent,
-        campaignReference: output.campaignReference,
-        sentAt: output.sentAt
-      }
+      output
     ]
   };
 }
 
 function sendExecuteJson(res, payload, reason = '') {
+  const output = Array.isArray(payload?.outArguments) ? payload.outArguments[0] || {} : {};
+  const responseBody = JSON.stringify(payload);
+
   console.log('[execute-response]', JSON.stringify({
     appVersion: APP_VERSION,
-    branchResult: payload.branchResult,
-    outArgumentsBranchResult: payload?.outArguments?.[0]?.branchResult,
+    branchResult: output.branchResult,
+    outArgumentsBranchResult: output.branchResult,
     outArgumentsShape: Array.isArray(payload.outArguments) ? `array:${payload.outArguments.length}` : typeof payload.outArguments,
-    messageStatus: payload.messageStatus,
-    errorCode: payload.errorCode,
+    messageStatus: output.messageStatus,
+    errorCode: output.errorCode,
     reason
   }));
 
   return res
     .status(200)
-    .type('application/json')
+    .set('Content-Type', 'application/json; charset=utf-8')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-    .json(payload);
+    .set('Content-Length', Buffer.byteLength(responseBody))
+    .send(responseBody);
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
@@ -960,7 +950,7 @@ function createExecuteResponder(res) {
         console.warn('[execute-response-skipped]', JSON.stringify({
           appVersion: APP_VERSION,
           reason,
-          branchResult: payload?.branchResult
+          branchResult: payload?.outArguments?.[0]?.branchResult
         }));
         return;
       }
@@ -992,15 +982,21 @@ app.post('/execute', rawBodyParser, async (req, res) => {
   let payload;
 
   try {
-    payload = decodeJwtOrPlainPayload(req.body);
-  } catch (error) {
     /*
-      Retornamos 200 con branch no_enviado para que Journey Builder pueda enrutar
-      el contacto al camino de error. Un 500 puede provocar retry/fallo de actividad
-      en lugar de avanzar por la rama.
+      En producción /execute debe venir firmado por SFMC.
+      Si el JWT falta o no valida, NO enviamos SMS. Devolvemos No enviado para
+      preservar el flujo y dejar trazabilidad del fallo.
     */
+    payload = decodeJwtOrPlainPayload(req.body, {
+      allowUnsignedJson: false,
+      allowInvalidJwt: false
+    });
+  } catch (error) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(error, 'JWT_ERROR'), 'jwt-error');
+    return executeResponder.send(providerErrorPayload(
+      Object.assign(error, { code: 'JWT_ERROR' }),
+      'JWT_ERROR'
+    ), 'jwt-error');
   }
 
   const args = mergeInArguments(payload.inArguments || payload?.arguments?.execute?.inArguments || []);

@@ -249,6 +249,66 @@
     return messages.length === 0;
   }
 
+
+  function applyExecutionContract() {
+    const origin = window.location.origin;
+
+    activityPayload.arguments = activityPayload.arguments || {};
+    activityPayload.arguments.execute = activityPayload.arguments.execute || {};
+
+    activityPayload.arguments.execute.outArguments = [
+      {
+        branchResult: '',
+        outcome: '',
+        messageStatus: '',
+        providerMessageId: '',
+        providerOperatorCode: '',
+        errorCode: '',
+        errorMessage: '',
+        providerResponse: '',
+        phoneSent: '',
+        campaignReference: '',
+        sentAt: ''
+      }
+    ];
+
+    activityPayload.arguments.execute.url = activityPayload.arguments.execute.url || `${origin}/execute`;
+    activityPayload.arguments.execute.verb = 'POST';
+    activityPayload.arguments.execute.body = '';
+    activityPayload.arguments.execute.header = '';
+    activityPayload.arguments.execute.format = 'json';
+
+    // /execute debe estar firmado por SFMC. La respuesta sigue siendo JSON plano con outArguments.
+    activityPayload.arguments.execute.useJwt = true;
+
+    activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
+    activityPayload.arguments.execute.retryCount = activityPayload.arguments.execute.retryCount || 0;
+    activityPayload.arguments.execute.retryDelay = activityPayload.arguments.execute.retryDelay || 5000;
+
+    activityPayload.outcomes = [
+      {
+        key: 'enviado',
+        displayName: 'Enviado',
+        arguments: {
+          branchResult: 'enviado'
+        },
+        metaData: {
+          invalid: false
+        }
+      },
+      {
+        key: 'no_enviado',
+        displayName: 'No enviado',
+        arguments: {
+          branchResult: 'no_enviado'
+        },
+        metaData: {
+          invalid: false
+        }
+      }
+    ];
+  }
+
   function saveActivity() {
     if (!validateForm()) {
       connection.trigger('ready');
@@ -261,6 +321,8 @@
       { message: messageInput.value.trim() },
       { campanyaReferencia: campaignReferenceInput.value.trim() }
     ]);
+
+    applyExecutionContract();
 
     activityPayload.metaData = activityPayload.metaData || {};
     activityPayload.metaData.isConfigured = true;
