@@ -58,6 +58,7 @@ label {
 
 select,
 textarea,
+input[type="text"],
 input[type="search"] {
   box-sizing: border-box;
   width: 100%;
@@ -71,6 +72,13 @@ input[type="search"] {
 textarea {
   resize: vertical;
   line-height: 1.45;
+}
+
+code {
+  font-family: Consolas, Monaco, monospace;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 
 .help {

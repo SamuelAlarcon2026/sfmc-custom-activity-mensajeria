@@ -31,6 +31,7 @@
   let initialized = false;
 
   const recipientField = document.getElementById('recipientField');
+  const campaignReferenceInput = document.getElementById('campaignReference');
   const messageInput = document.getElementById('message');
   const charCount = document.getElementById('charCount');
   const fieldList = document.getElementById('fieldList');
@@ -225,6 +226,7 @@
   function hydrateFormFromPayload() {
     messageInput.value = getInArgument('message') || '';
     recipientField.value = getInArgument('to') || '';
+    campaignReferenceInput.value = getInArgument('campanyaReferencia') || '';
     updateCharCount();
   }
 
@@ -233,6 +235,10 @@
 
     if (!recipientField.value) {
       messages.push('Selecciona el campo destino/teléfono.');
+    }
+
+    if (!campaignReferenceInput.value.trim()) {
+      messages.push('Indica la referencia de campaña BITMessage.');
     }
 
     if (!messageInput.value.trim()) {
@@ -252,12 +258,13 @@
     setExecuteInArguments([
       { contactKey: '{{Contact.Key}}' },
       { to: recipientField.value },
-      { message: messageInput.value.trim() }
+      { message: messageInput.value.trim() },
+      { campanyaReferencia: campaignReferenceInput.value.trim() }
     ]);
 
     activityPayload.metaData = activityPayload.metaData || {};
     activityPayload.metaData.isConfigured = true;
-    activityPayload.name = activityPayload.name || 'Mensaje externo';
+    activityPayload.name = activityPayload.name || 'BitMessage';
 
     connection.trigger('updateActivity', activityPayload);
   }

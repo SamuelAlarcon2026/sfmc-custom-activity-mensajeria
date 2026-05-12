@@ -1,182 +1,289 @@
-# SFMC Journey Builder Custom Activity: Mensaje externo
+# SFMC Journey Builder Custom Activity: BITMessage / Fundació BIT
 
-Custom Activity para Salesforce Marketing Cloud Journey Builder que:
-
-- Se conecta a un proveedor externo de mensajería vía API.
-- Permite configurar el mensaje desde una caja de texto.
-- Muestra variables disponibles desde la Data Extension de entrada de la Journey.
-- Inserta variables en formato de Journey Builder, por ejemplo `{{Event.<EventDefinitionKey>.<Campo>}}`.
-- Expone dos ramas: `Enviado` y `No enviado`.
-- Devuelve outArguments para registrar resultado, error y respuesta del proveedor.
-
-## Estructura
+Custom Activity para Salesforce Marketing Cloud Journey Builder que envía SMS mediante el endpoint de BITMessage / Fundació BIT:
 
 ```text
-.
-├── public/
-│   ├── index.html
-│   ├── customActivity.js
-│   ├── styles.css
-│   └── images/icon.svg
-├── server.js
-├── package.json
-└── .env.example
+https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
 ```
 
-## Instalación local
+La actividad:
 
-```bash
-npm install
-cp .env.example .env
-npm run dev
+- Muestra una interfaz de configuración dentro de Journey Builder.
+- Permite seleccionar el campo teléfono desde la Data Extension de entrada.
+- Permite escribir el mensaje con variables de la Entry Source.
+- Permite configurar `campanyaReferencia`.
+- Envía el SMS mediante `POST` JSON a BITMessage.
+- Evalúa el campo `estado` de BITMessage, no solo el HTTP status.
+- Enruta al contacto por dos ramas:
+  - `Enviado`
+  - `No enviado`
+- Devuelve outArguments para registrar errores y respuesta del proveedor.
+
+## Payload enviado a BITMessage
+
+La actividad llama a BITMessage con `POST` y este body:
+
+```json
+{
+  "telefono": "34654162543",
+  "texto": "Mensaje de prueba",
+  "campanyaReferencia": "SOIB"
+}
 ```
 
-Para probar desde Journey Builder, la app debe estar disponible por HTTPS público. En local puedes usar un túnel HTTPS solo para desarrollo.
+Se usa `POST` en lugar de `GET` para evitar exponer el texto del mensaje en la URL y para manejar mejor caracteres especiales.
+
+## Respuesta de BITMessage
+
+BITMessage puede devolver HTTP 200 tanto para éxito como para error funcional. Por eso el backend revisa el campo `estado`.
+
+Éxito esperado:
+
+```json
+{
+  "id": 16312,
+  "codigoExternoOperadora": "vasadpt1-mm7ext@3056@20210527140700907@02006377",
+  "fechaEnvio": "2021-05-27T14:06:54.748658",
+  "telefono": "605697182",
+  "texto": "Hola10",
+  "estado": "ENVIADO",
+  "campanyaReferencia": "SOIB"
+}
+```
+
+Error esperado:
+
+```json
+{
+  "telefono": "605697182",
+  "texto": "Hola10",
+  "estado": "ERROR",
+  "infoError": "ERROR_CAMPANYA_NO_EXISTE",
+  "campanyaReferencia": "SOIB2"
+}
+```
+
+Si `estado` es `ERROR`, el contacto sale por la rama `No enviado`.
+
+## Normalización del teléfono
+
+Antes de llamar a BITMessage, el backend normaliza el teléfono:
+
+```text
+654162543      -> 34654162543
++33123456789   -> 0033123456789
+0033123456789  -> 0033123456789
+34654162543    -> 34654162543
+```
+
+Después de normalizar, el teléfono debe empezar por:
+
+```text
+34
+```
+
+o por:
+
+```text
+00
+```
 
 ## Variables de entorno
 
 ```env
-BASE_URL=https://tu-dominio-publico.com
-JWT_SECRET=el_mismo_jwt_signing_secret_del_installed_package
-EXTERNAL_API_URL=https://api.proveedor.com/messages
-EXTERNAL_API_KEY=token_del_proveedor
-EXTERNAL_API_TIMEOUT_MS=10000
-PORT=3000
+BASE_URL=https://tu-servicio.onrender.com
+JWT_SECRET=el_jwt_signing_secret_del_installed_package
+
+BITMESSAGE_API_URL=https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
+BITMESSAGE_API_TIMEOUT_MS=10000
+BITMESSAGE_CAMPANYA_REFERENCIA=
+
+BITMESSAGE_AUTH_TYPE=basic
+BITMESSAGE_USERNAME=
+BITMESSAGE_PASSWORD=
+
+BITMESSAGE_API_KEY=
+BITMESSAGE_AUTH_HEADER_NAME=
+BITMESSAGE_AUTH_HEADER_VALUE=
+```
+
+### Autenticación
+
+La documentación recibida indica que el endpoint se invoca con un usuario autorizado, pero no concreta el mecanismo de autenticación. Por eso el desarrollo soporta varios modos.
+
+#### Basic Auth
+
+```env
+BITMESSAGE_AUTH_TYPE=basic
+BITMESSAGE_USERNAME=usuario
+BITMESSAGE_PASSWORD=password
+```
+
+Envía:
+
+```text
+Authorization: Basic base64(usuario:password)
+```
+
+#### Bearer Token
+
+```env
+BITMESSAGE_AUTH_TYPE=bearer
+BITMESSAGE_API_KEY=token
+```
+
+Envía:
+
+```text
+Authorization: Bearer token
+```
+
+#### Header personalizado
+
+```env
+BITMESSAGE_AUTH_TYPE=custom
+BITMESSAGE_AUTH_HEADER_NAME=X-API-Key
+BITMESSAGE_AUTH_HEADER_VALUE=valor
+```
+
+#### Sin cabecera de autenticación
+
+```env
+BITMESSAGE_AUTH_TYPE=none
+```
+
+Úsalo solo si el acceso está autorizado por otro mecanismo, por ejemplo IP allowlist, VPN o proxy.
+
+## Configuración en Render
+
+Build Command:
+
+```text
+npm install
+```
+
+Start Command:
+
+```text
+npm start
+```
+
+Variables mínimas en Render:
+
+```env
+BASE_URL=https://tu-servicio.onrender.com
+JWT_SECRET=valor_del_jwt_signing_secret_de_sfmc
+BITMESSAGE_API_URL=https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
+BITMESSAGE_API_TIMEOUT_MS=10000
+BITMESSAGE_AUTH_TYPE=basic
+BITMESSAGE_USERNAME=tu_usuario_bitmessage
+BITMESSAGE_PASSWORD=tu_password_bitmessage
+NODE_ENV=production
+```
+
+No pongas `/` al final de `BASE_URL`.
+
+Correcto:
+
+```text
+https://tu-servicio.onrender.com
+```
+
+Incorrecto:
+
+```text
+https://tu-servicio.onrender.com/
 ```
 
 ## Configuración en SFMC
 
-1. Crea un Installed Package en Salesforce Marketing Cloud.
-2. Agrega un componente de tipo Journey Builder Activity.
-3. Configura la URL del endpoint como:
+En el Installed Package de Salesforce Marketing Cloud, el componente `Journey Builder Activity` debe apuntar a:
 
 ```text
-https://tu-dominio-publico.com/config.json
+https://tu-servicio.onrender.com/config.json
 ```
 
-4. Usa el mismo `JWT Signing Secret` del paquete como `JWT_SECRET` en el servidor.
-5. Publica la app en un hosting con HTTPS.
+No apuntes a `/index.html`.
 
-## Cómo funciona el ruteo
+## URLs de diagnóstico
 
-El `config.json` define dos outcomes:
+Después del deploy, prueba:
 
-```json
-{
-  "key": "enviado",
-  "arguments": { "branchResult": "enviado" }
-}
+```text
+https://tu-servicio.onrender.com/health
+https://tu-servicio.onrender.com/index.html
+https://tu-servicio.onrender.com/vendor/postmonger.js
+https://tu-servicio.onrender.com/config.json
+https://tu-servicio.onrender.com/debug/config
 ```
 
-```json
-{
-  "key": "no_enviado",
-  "arguments": { "branchResult": "no_enviado" }
-}
+`/debug/config` no muestra secretos, pero indica si están configurados.
+
+## OutArguments disponibles
+
+La actividad devuelve estos campos:
+
+```text
+branchResult
+messageStatus
+providerMessageId
+providerOperatorCode
+errorCode
+errorMessage
+providerResponse
+phoneSent
+campaignReference
+sentAt
 ```
 
-El endpoint `/execute` devuelve `branchResult` como outArgument:
+Ejemplo de éxito:
 
 ```json
 {
   "branchResult": "enviado",
   "messageStatus": "ENVIADO",
-  "providerMessageId": "abc123",
+  "providerMessageId": "16312",
+  "providerOperatorCode": "vasadpt1-mm7ext@3056@20210527140700907@02006377",
   "errorCode": "",
   "errorMessage": "",
-  "providerResponse": "...",
-  "sentAt": "2026-05-12T00:00:00.000Z"
+  "providerResponse": "{...}",
+  "phoneSent": "34654162543",
+  "campaignReference": "SOIB",
+  "sentAt": "2021-05-27T14:06:54.748658"
 }
 ```
 
-o, si falla:
+Ejemplo de error:
 
 ```json
 {
   "branchResult": "no_enviado",
-  "messageStatus": "NO_ENVIADO",
+  "messageStatus": "ERROR",
   "providerMessageId": "",
-  "errorCode": "HTTP_400",
-  "errorMessage": "Número inválido",
-  "providerResponse": "...",
+  "providerOperatorCode": "",
+  "errorCode": "ERROR_CAMPANYA_NO_EXISTE",
+  "errorMessage": "ERROR_CAMPANYA_NO_EXISTE",
+  "providerResponse": "{...}",
+  "phoneSent": "34654162543",
+  "campaignReference": "SOIB2",
   "sentAt": "2026-05-12T00:00:00.000Z"
 }
 ```
 
-> Importante: el endpoint `/execute` responde HTTP 200 incluso cuando el proveedor falla. Esto permite que Journey Builder continúe por la rama `No enviado`. Si respondes 500, Journey Builder puede tratarlo como fallo técnico de actividad en lugar de enrutar al contacto.
+## Prueba local de `/execute`
 
-## Adaptar payload del proveedor externo
+En local y con `NODE_ENV` distinto de `production`, puedes probar sin JWT con un payload JSON:
 
-En `server.js`, modifica la función `sendExternalMessage()`:
-
-```js
-body: JSON.stringify({
-  to,
-  message,
-  contactKey
-})
+```bash
+curl -X POST http://localhost:3000/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inArguments": [
+      { "to": "654162543" },
+      { "message": "Mensaje de prueba" },
+      { "campanyaReferencia": "SOIB" }
+    ]
+  }'
 ```
 
-Sustitúyelo por el formato requerido por tu proveedor, por ejemplo:
-
-```js
-body: JSON.stringify({
-  recipient: to,
-  text: message,
-  channel: 'whatsapp',
-  metadata: {
-    contactKey
-  }
-})
-```
-
-## Registro de errores
-
-La actividad devuelve estos campos como `outArguments`:
-
-- `messageStatus`
-- `providerMessageId`
-- `errorCode`
-- `errorMessage`
-- `providerResponse`
-- `sentAt`
-
-En la rama `No enviado`, puedes agregar una actividad posterior para registrar el error en una Data Extension de auditoría, o extender `server.js` para hacer el insert/upsert directamente en una DE de log usando la REST API de SFMC.
-
-## Troubleshooting en Render / Journey Builder
-
-Después de desplegar, prueba estas URLs:
-
-```text
-https://tu-servicio.onrender.com/health
-https://tu-servicio.onrender.com/index.html
-https://tu-servicio.onrender.com/config.json
-https://tu-servicio.onrender.com/debug/config
-```
-
-En el Installed Package de SFMC, la URL debe ser:
-
-```text
-https://tu-servicio.onrender.com/config.json
-```
-
-Dentro de `config.json`, `userInterfaces.configModal.url` debe responder como:
-
-```text
-https://tu-servicio.onrender.com/index.html
-```
-
-Si `/index.html` abre en el navegador pero no dentro de Journey Builder, revisa:
-
-- `BASE_URL` en Render debe ser exactamente el dominio público HTTPS de Render, sin slash final.
-- El servicio no debe estar dormido por inactividad en el momento de abrir la Custom Activity.
-- Revisa que `https://tu-servicio.onrender.com/vendor/postmonger.js` abra en navegador. La UI usa Postmonger local para evitar bloqueos de CDNs externos dentro de Journey Builder.
-- Revisa logs de Render cuando haces clic en la actividad desde Journey Builder.
-- Evita configurar headers `X-Frame-Options: DENY` o `SAMEORIGIN` mediante proxies externos.
-- Después de cambiar `config.json`, elimina y vuelve a agregar el componente Journey Builder Activity en el Installed Package o refresca la actividad en Journey Builder.
-
-
-## Nota para Render
-
-Esta versión usa `postmonger` `^0.0.16`. Si Render había fallado antes con `postmonger@0.0.14`,
-vuelve a desplegar usando **Clear build cache & deploy** para forzar un `npm install` limpio.
+En producción Journey Builder enviará JWT porque `config.json` tiene `useJwt: true`.

@@ -1,7 +1,7 @@
 {
-  "name": "sfmc-external-message-custom-activity",
+  "name": "sfmc-bitmessage-custom-activity",
   "version": "1.0.0",
-  "description": "Salesforce Marketing Cloud Journey Builder Custom Activity para envío a un servicio de mensajería externo con ramas Enviado/No enviado.",
+  "description": "Salesforce Marketing Cloud Journey Builder Custom Activity para envío de SMS mediante BITMessage/Fundació BIT con ramas Enviado/No enviado.",
   "type": "module",
   "main": "server.js",
   "scripts": {

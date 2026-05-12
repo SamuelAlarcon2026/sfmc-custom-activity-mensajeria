@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Mensaje externo</title>
+  <title>BitMessage</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -11,8 +11,8 @@
     <header class="header">
       <img src="/images/icon.svg" alt="" class="icon">
       <div>
-        <h1>Mensaje externo</h1>
-        <p>Configura el mensaje que se enviará mediante la API externa.</p>
+        <h1>BitMessage</h1>
+        <p>Configura el SMS que se enviará mediante BITMessage / Fundació BIT.</p>
       </div>
     </header>
 
@@ -21,7 +21,13 @@
       <select id="recipientField">
         <option value="">Cargando campos...</option>
       </select>
-      <p class="help">Solo se muestran campos del esquema de entrada expuesto por Journey Builder para esta Journey.</p>
+      <p class="help">Solo se muestran campos del esquema de entrada expuesto por Journey Builder para esta Journey. El teléfono se normaliza antes de enviarse: 654123123 → 34654123123; +33123456789 → 0033123456789.</p>
+    </section>
+
+    <section class="panel">
+      <label for="campaignReference">Referencia de campaña BITMessage</label>
+      <input id="campaignReference" type="text" placeholder="Ejemplo: SOIB, PRUEBA-IBSALUT">
+      <p class="help">Valor que se enviará en el campo <code>campanyaReferencia</code>. Debe existir en BITMessage.</p>
     </section>
 
     <section class="panel">
@@ -29,7 +35,7 @@
         <label for="message">Mensaje</label>
         <span id="charCount">0 caracteres</span>
       </div>
-      <textarea id="message" rows="8" placeholder="Ejemplo: Hola {{Event.MiEntrada.Nombre}}, tu pedido está listo."></textarea>
+      <textarea id="message" rows="8" placeholder="Ejemplo: Hola {{Event.MiEntrada.Nombre}}, tu cita está confirmada."></textarea>
       <p class="help">Haz clic en una variable para insertarla en el texto.</p>
     </section>
 
