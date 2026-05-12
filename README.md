@@ -174,3 +174,9 @@ Si `/index.html` abre en el navegador pero no dentro de Journey Builder, revisa:
 - Revisa logs de Render cuando haces clic en la actividad desde Journey Builder.
 - Evita configurar headers `X-Frame-Options: DENY` o `SAMEORIGIN` mediante proxies externos.
 - Después de cambiar `config.json`, elimina y vuelve a agregar el componente Journey Builder Activity en el Installed Package o refresca la actividad en Journey Builder.
+
+
+## Nota para Render
+
+Esta versión usa `postmonger` `^0.0.16`. Si Render había fallado antes con `postmonger@0.0.14`,
+vuelve a desplegar usando **Clear build cache & deploy** para forzar un `npm install` limpio.
