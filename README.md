@@ -287,3 +287,21 @@ curl -X POST http://localhost:3000/execute \
 ```
 
 En producción Journey Builder enviará JWT porque `config.json` tiene `useJwt: true`.
+
+
+## Fix de validación/publicación en Journey Builder
+
+Esta versión evita el error genérico de Salesforce Marketing Cloud:
+
+```text
+A custom activity or entry source failed validation. Check to ensure that the activity or entry source publishes to a valid endpoint.
+```
+
+Cambios aplicados:
+
+- `/save`, `/validate`, `/publish` y `/stop` responden siempre HTTP 200 si el endpoint está vivo.
+- Los endpoints de configuración ya no requieren JWT (`useJwt: false`), porque no ejecutan envíos ni acciones sensibles.
+- `/execute` mantiene JWT obligatorio (`useJwt: true`) para proteger la ejecución real del envío.
+- La configuración incompleta de BITMessage ya no rompe la publicación de la Journey; si en ejecución falta algo, el contacto se enruta por `No enviado` con `errorCode` y `errorMessage`.
+
+Después de subir esta versión a Render, usa **Manual Deploy > Clear build cache & deploy** y vuelve a arrastrar la actividad al canvas para que Journey Builder lea el nuevo `config.json`.

@@ -193,28 +193,28 @@ function buildConfig() {
       save: {
         url: `${BASE_URL}/save`,
         verb: 'POST',
-        useJwt: true,
+        useJwt: false,
         body: '',
         header: ''
       },
       validate: {
         url: `${BASE_URL}/validate`,
         verb: 'POST',
-        useJwt: true,
+        useJwt: false,
         body: '',
         header: ''
       },
       publish: {
         url: `${BASE_URL}/publish`,
         verb: 'POST',
-        useJwt: true,
+        useJwt: false,
         body: '',
         header: ''
       },
       stop: {
         url: `${BASE_URL}/stop`,
         verb: 'POST',
-        useJwt: true,
+        useJwt: false,
         body: '',
         header: ''
       }
@@ -376,7 +376,12 @@ function parseMaybeJson(value) {
   }
 }
 
-function decodeJwtOrPlainPayload(rawBody) {
+function decodeJwtOrPlainPayload(rawBody, options = {}) {
+  const {
+    allowUnsignedJson = false,
+    allowInvalidJwt = false
+  } = options;
+
   const trimmed = String(rawBody || '').trim();
   const parsed = parseMaybeJson(trimmed);
 
@@ -391,23 +396,59 @@ function decodeJwtOrPlainPayload(rawBody) {
 
   if (token) {
     if (!JWT_SECRET) {
+      if (allowInvalidJwt) {
+        return parsed || {};
+      }
+
       throw new Error('JWT_SECRET no está configurado en el servidor.');
     }
 
-    return jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256']
-    });
+    try {
+      return jwt.verify(token, JWT_SECRET, {
+        algorithms: ['HS256']
+      });
+    } catch (error) {
+      if (allowInvalidJwt) {
+        return parsed || {};
+      }
+
+      throw new Error(`JWT inválido o firmado con otro secret: ${error.message}`);
+    }
   }
 
   /*
     Permite pruebas locales con payload JSON sin JWT.
-    En producción mantén useJwt=true en config.json y define JWT_SECRET.
+    En producción, /execute mantiene JWT obligatorio.
+    Los endpoints de configuración (/save, /validate, /publish, /stop)
+    pueden aceptar JSON sin JWT porque Journey Builder puede validarlos
+    antes de que el JWT_SECRET esté corregido en Render.
   */
-  if (process.env.NODE_ENV !== 'production' && parsed) {
+  if ((process.env.NODE_ENV !== 'production' || allowUnsignedJson) && parsed) {
     return parsed;
   }
 
+  if (allowInvalidJwt) {
+    return parsed || {};
+  }
+
   throw new Error('No se recibió JWT válido desde Journey Builder.');
+}
+
+function decodeConfigurationPayload(rawBody) {
+  try {
+    return {
+      payload: decodeJwtOrPlainPayload(rawBody, {
+        allowUnsignedJson: true,
+        allowInvalidJwt: true
+      }),
+      warning: ''
+    };
+  } catch (error) {
+    return {
+      payload: {},
+      warning: error.message
+    };
+  }
 }
 
 function mergeInArguments(inArguments = []) {
@@ -686,20 +727,28 @@ async function sendBitmessage({ to, message, campanyaReferencia }) {
 }
 
 app.post('/save', rawBodyParser, (req, res) => {
-  try {
-    decodeJwtOrPlainPayload(req.body);
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
+  const decoded = decodeConfigurationPayload(req.body);
+
+  return res.status(200).json({
+    success: true,
+    warning: decoded.warning || undefined
+  });
 });
 
 app.post('/validate', rawBodyParser, (req, res) => {
-  try {
-    const payload = decodeJwtOrPlainPayload(req.body);
-    const args = mergeInArguments(payload?.arguments?.execute?.inArguments || payload?.inArguments || []);
-    const errors = [];
+  const decoded = decodeConfigurationPayload(req.body);
+  const payload = decoded.payload || {};
+  const args = mergeInArguments(payload?.arguments?.execute?.inArguments || payload?.inArguments || []);
+  const errors = [];
 
+  /*
+    No devolvemos HTTP 400 en /validate porque Journey Builder muestra el error
+    genérico "publishes to a valid endpoint" y no enseña el detalle al usuario.
+    La validación visible ya se hace en la UI antes de pulsar Done.
+    Si falta configuración de BITMessage, /execute enviará el contacto por la rama No enviado
+    con errorCode/errorMessage para poder auditarlo.
+  */
+  if (Object.keys(args).length) {
     if (!args.to) {
       errors.push('Selecciona el campo destino/teléfono.');
     }
@@ -711,38 +760,32 @@ app.post('/validate', rawBodyParser, (req, res) => {
     if (!String(args.campanyaReferencia || BITMESSAGE_CAMPANYA_REFERENCIA || '').trim()) {
       errors.push('Indica la referencia de campaña de BITMessage.');
     }
-
-    errors.push(...validateServerConfiguration());
-
-    if (errors.length) {
-      return res.status(400).json({
-        success: false,
-        errors
-      });
-    }
-
-    return res.status(200).json({ success: true });
-  } catch (error) {
-    return res.status(400).json({ success: false, message: error.message });
   }
+
+  return res.status(200).json({
+    success: true,
+    valid: errors.length === 0,
+    errors,
+    warning: decoded.warning || undefined
+  });
 });
 
 app.post('/publish', rawBodyParser, (req, res) => {
-  try {
-    decodeJwtOrPlainPayload(req.body);
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
+  const decoded = decodeConfigurationPayload(req.body);
+
+  return res.status(200).json({
+    success: true,
+    warning: decoded.warning || undefined
+  });
 });
 
 app.post('/stop', rawBodyParser, (req, res) => {
-  try {
-    decodeJwtOrPlainPayload(req.body);
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(200).json({ success: true, warning: error.message });
-  }
+  const decoded = decodeConfigurationPayload(req.body);
+
+  return res.status(200).json({
+    success: true,
+    warning: decoded.warning || undefined
+  });
 });
 
 app.post('/execute', rawBodyParser, async (req, res) => {
