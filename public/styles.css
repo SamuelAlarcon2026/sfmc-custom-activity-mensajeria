@@ -1,0 +1,149 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #181818;
+  background: #f7f9fb;
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  box-sizing: border-box;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.icon {
+  width: 48px;
+  height: 48px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+p {
+  margin: 6px 0 0;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+select,
+textarea,
+input[type="search"] {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #b6beca;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.help {
+  color: #5f6a7d;
+  font-size: 13px;
+}
+
+.messageHeader,
+.variablesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+#charCount {
+  color: #5f6a7d;
+  font-size: 13px;
+}
+
+#fieldSearch {
+  max-width: 260px;
+}
+
+.fieldList {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.fieldButton {
+  text-align: left;
+  border: 1px solid #d8dde6;
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.fieldButton:hover,
+.fieldButton:focus {
+  outline: none;
+  border-color: #0176d3;
+  box-shadow: 0 0 0 2px rgba(1, 118, 211, 0.15);
+}
+
+.fieldName {
+  display: block;
+  font-weight: 700;
+}
+
+.fieldKey {
+  display: block;
+  margin-top: 4px;
+  color: #5f6a7d;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.empty {
+  color: #5f6a7d;
+  grid-column: 1 / -1;
+}
+
+.errors {
+  border: 1px solid #ba0517;
+  background: #fff1f1;
+  color: #8e030f;
+  border-radius: 8px;
+  padding: 14px 18px;
+}
+
+.hidden {
+  display: none;
+}

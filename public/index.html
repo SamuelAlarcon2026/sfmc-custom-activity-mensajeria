@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Mensaje externo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <img src="/images/icon.svg" alt="" class="icon">
+      <div>
+        <h1>Mensaje externo</h1>
+        <p>Configura el mensaje que se enviará mediante la API externa.</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <label for="recipientField">Campo destino/teléfono de la Data Extension de entrada</label>
+      <select id="recipientField">
+        <option value="">Cargando campos...</option>
+      </select>
+      <p class="help">Solo se muestran campos del esquema de entrada expuesto por Journey Builder para esta Journey.</p>
+    </section>
+
+    <section class="panel">
+      <div class="messageHeader">
+        <label for="message">Mensaje</label>
+        <span id="charCount">0 caracteres</span>
+      </div>
+      <textarea id="message" rows="8" placeholder="Ejemplo: Hola {{Event.MiEntrada.Nombre}}, tu pedido está listo."></textarea>
+      <p class="help">Haz clic en una variable para insertarla en el texto.</p>
+    </section>
+
+    <section class="panel">
+      <div class="variablesHeader">
+        <h2>Variables disponibles</h2>
+        <input id="fieldSearch" type="search" placeholder="Buscar campo...">
+      </div>
+      <div id="fieldList" class="fieldList">
+        <p class="empty">Cargando variables desde Journey Builder...</p>
+      </div>
+    </section>
+
+    <section id="errors" class="errors hidden"></section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/postmonger/0.0.14/postmonger.min.js"></script>
+  <script src="/customActivity.js"></script>
+</body>
+</html>
