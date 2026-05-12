@@ -2,10 +2,13 @@ import 'dotenv/config';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -16,6 +19,38 @@ const EXTERNAL_API_KEY = process.env.EXTERNAL_API_KEY || '';
 const EXTERNAL_API_TIMEOUT_MS = Number(process.env.EXTERNAL_API_TIMEOUT_MS || 10000);
 
 app.disable('x-powered-by');
+
+
+// Servimos Postmonger desde el mismo dominio para evitar bloqueos de CDNs externos dentro del iframe de Journey Builder.
+app.get('/vendor/postmonger.js', (req, res) => {
+  try {
+    const resolvedPath = require.resolve('postmonger');
+    return res
+      .type('application/javascript')
+      .set('Cache-Control', 'public, max-age=86400')
+      .sendFile(resolvedPath);
+  } catch (error) {
+    const candidatePaths = [
+      path.join(__dirname, 'node_modules', 'postmonger', 'postmonger.js'),
+      path.join(__dirname, 'node_modules', 'postmonger', 'dist', 'postmonger.js'),
+      path.join(__dirname, 'node_modules', 'postmonger', 'dist', 'postmonger.min.js'),
+      path.join(__dirname, 'node_modules', 'postmonger', 'lib', 'postmonger.js')
+    ];
+
+    const existingPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+    if (existingPath) {
+      return res
+        .type('application/javascript')
+        .set('Cache-Control', 'public, max-age=86400')
+        .sendFile(existingPath);
+    }
+
+    return res
+      .status(500)
+      .type('application/javascript')
+      .send('console.error("No se encontró el paquete postmonger. Ejecuta npm install y redeploy.");');
+  }
+});
 
 // Render/SFMC health check.
 app.get('/health', (req, res) => {

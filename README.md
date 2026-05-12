@@ -170,6 +170,7 @@ Si `/index.html` abre en el navegador pero no dentro de Journey Builder, revisa:
 
 - `BASE_URL` en Render debe ser exactamente el dominio público HTTPS de Render, sin slash final.
 - El servicio no debe estar dormido por inactividad en el momento de abrir la Custom Activity.
+- Revisa que `https://tu-servicio.onrender.com/vendor/postmonger.js` abra en navegador. La UI usa Postmonger local para evitar bloqueos de CDNs externos dentro de Journey Builder.
 - Revisa logs de Render cuando haces clic en la actividad desde Journey Builder.
 - Evita configurar headers `X-Frame-Options: DENY` o `SAMEORIGIN` mediante proxies externos.
 - Después de cambiar `config.json`, elimina y vuelve a agregar el componente Journey Builder Activity en el Installed Package o refresca la actividad en Journey Builder.

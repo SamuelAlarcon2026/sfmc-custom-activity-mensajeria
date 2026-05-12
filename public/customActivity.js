@@ -1,10 +1,34 @@
 /* global Postmonger */
 (function () {
+  const bootError = document.getElementById('errors');
+
+  function showBootError(message) {
+    if (!bootError) return;
+    bootError.classList.remove('hidden');
+    bootError.innerHTML = `<strong>Error cargando la actividad:</strong><ul><li>${escapeHtml(message)}</li></ul>`;
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  if (!window.Postmonger || !window.Postmonger.Session) {
+    showBootError('No se pudo cargar Postmonger desde /vendor/postmonger.js. Revisa que Render haya ejecutado npm install y que /vendor/postmonger.js abra en el navegador.');
+    return;
+  }
+
   const connection = new Postmonger.Session();
 
   let activityPayload = {};
   let entryFields = [];
   let triggerEventDefinitionKey = '';
+  let schemaLoaded = false;
+  let initialized = false;
 
   const recipientField = document.getElementById('recipientField');
   const messageInput = document.getElementById('message');
@@ -22,15 +46,6 @@
 
     errors.classList.remove('hidden');
     errors.innerHTML = `<strong>Revisa la configuración:</strong><ul>${messages.map((m) => `<li>${escapeHtml(m)}</li>`).join('')}</ul>`;
-  }
-
-  function escapeHtml(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
   }
 
   function stripHandlebars(value) {
@@ -100,11 +115,7 @@
   function isEntryDataField(field) {
     const key = stripHandlebars(field.key);
 
-    /*
-      En Journey Builder, los campos de la DE de entrada suelen llegar como Event.<EventDefinitionKey>.<Campo>.
-      Filtramos Event.* y, cuando Journey Builder entrega la key del evento, exigimos que coincida.
-      Así evitamos mostrar Contact Attributes u otros datos no pertenecientes a la DE conectada.
-    */
+    // Los campos de la DE de entrada suelen venir como Event.<EventDefinitionKey>.<Campo>.
     if (!key.startsWith('Event.')) return false;
 
     if (!triggerEventDefinitionKey) return true;
@@ -251,12 +262,35 @@
     connection.trigger('updateActivity', activityPayload);
   }
 
+  function requestJourneyData() {
+    try {
+      connection.trigger('requestTriggerEventDefinition');
+      connection.trigger('requestSchema');
+      // Algunos tenants responden mejor si se solicita interaction también.
+      connection.trigger('requestInteraction');
+    } catch (error) {
+      setErrors([`No se pudo solicitar el esquema a Journey Builder: ${error.message}`]);
+    }
+  }
+
+  function handleSchema(data) {
+    const rawFields = schemaFromPayload(data);
+    const normalized = rawFields.map(normalizeSchemaItem).filter(Boolean);
+    const eventOnly = uniqueFields(normalized.filter(isEntryDataField));
+
+    schemaLoaded = true;
+    entryFields = eventOnly;
+    renderRecipientOptions();
+    renderFieldButtons();
+    hydrateFormFromPayload();
+  }
+
   connection.on('initActivity', function (payload) {
+    initialized = true;
     activityPayload = payload || {};
     hydrateFormFromPayload();
 
-    connection.trigger('requestTriggerEventDefinition');
-    connection.trigger('requestSchema');
+    requestJourneyData();
     connection.trigger('ready');
   });
 
@@ -271,15 +305,13 @@
     connection.trigger('requestSchema');
   });
 
-  connection.on('requestedSchema', function (data) {
-    const rawFields = schemaFromPayload(data);
-    const normalized = rawFields.map(normalizeSchemaItem).filter(Boolean);
-    const eventOnly = uniqueFields(normalized.filter(isEntryDataField));
+  connection.on('requestedSchema', handleSchema);
 
-    entryFields = eventOnly;
-    renderRecipientOptions();
-    renderFieldButtons();
-    hydrateFormFromPayload();
+  connection.on('requestedInteraction', function () {
+    // No usamos la interaction para pintar campos, pero la pedimos para forzar a JB a completar contexto en algunos tenants.
+    if (!schemaLoaded) {
+      connection.trigger('requestSchema');
+    }
   });
 
   connection.on('clickedNext', saveActivity);
@@ -288,8 +320,31 @@
   messageInput.addEventListener('input', updateCharCount);
   fieldSearch.addEventListener('input', renderFieldButtons);
 
-  document.addEventListener('DOMContentLoaded', function () {
+  function boot() {
     updateCharCount();
     connection.trigger('ready');
-  });
+
+    // Reintentamos por si initActivity tarda en llegar.
+    setTimeout(function () {
+      if (!initialized) {
+        connection.trigger('ready');
+      }
+      if (!schemaLoaded) {
+        requestJourneyData();
+      }
+    }, 1500);
+
+    setTimeout(function () {
+      if (!schemaLoaded) {
+        recipientField.innerHTML = '<option value="">No se recibió el esquema desde Journey Builder</option>';
+        fieldList.innerHTML = '<p class="empty">Journey Builder no devolvió campos. Cierra la actividad, confirma que la Journey tenga una Entry Source de tipo Data Extension y vuelve a abrirla.</p>';
+      }
+    }, 9000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();
