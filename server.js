@@ -15,6 +15,11 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
 
+function numberFromEnv(value, fallbackValue) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : fallbackValue;
+}
+
 /*
   BITMessage / Fundació BIT
 
@@ -31,10 +36,30 @@ const BITMESSAGE_API_URL = (
 ).trim();
 
 const BITMESSAGE_CAMPANYA_REFERENCIA = (process.env.BITMESSAGE_CAMPANYA_REFERENCIA || '').trim();
-const BITMESSAGE_API_TIMEOUT_MS = Number(
-  process.env.BITMESSAGE_API_TIMEOUT_MS ||
-  process.env.EXTERNAL_API_TIMEOUT_MS ||
-  10000
+
+/*
+  Timeout de Journey Builder frente a timeout del proveedor.
+
+  La Custom Activity debe contestar a Journey Builder antes de que venza
+  arguments.execute.timeout. Por eso el timeout hacia BITMessage se mantiene
+  por debajo del timeout de ejecución de SFMC.
+
+  Valores recomendados:
+  SFMC_EXECUTE_TIMEOUT_MS=60000
+  BITMESSAGE_API_TIMEOUT_MS=25000
+*/
+const SFMC_EXECUTE_TIMEOUT_MS = numberFromEnv(process.env.SFMC_EXECUTE_TIMEOUT_MS, 60000);
+const SFMC_EXECUTE_RETRY_COUNT = Math.max(0, Math.floor(numberFromEnv(process.env.SFMC_EXECUTE_RETRY_COUNT, 0)));
+const SFMC_EXECUTE_RETRY_DELAY_MS = numberFromEnv(process.env.SFMC_EXECUTE_RETRY_DELAY_MS, 5000);
+
+const RAW_BITMESSAGE_API_TIMEOUT_MS = numberFromEnv(
+  process.env.BITMESSAGE_API_TIMEOUT_MS || process.env.EXTERNAL_API_TIMEOUT_MS,
+  25000
+);
+
+const BITMESSAGE_API_TIMEOUT_MS = Math.min(
+  RAW_BITMESSAGE_API_TIMEOUT_MS,
+  Math.max(1000, SFMC_EXECUTE_TIMEOUT_MS - 5000)
 );
 
 /*
@@ -186,7 +211,9 @@ function buildConfig() {
         header: '',
         format: 'json',
         useJwt: true,
-        timeout: BITMESSAGE_API_TIMEOUT_MS
+        timeout: SFMC_EXECUTE_TIMEOUT_MS,
+        retryCount: SFMC_EXECUTE_RETRY_COUNT,
+        retryDelay: SFMC_EXECUTE_RETRY_DELAY_MS
       }
     },
     configurationArguments: {
@@ -349,7 +376,12 @@ app.get('/debug/config', (req, res) => {
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `provider=BITMessage Fundacio BIT`,
+      `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
+      `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
+      `sfmc.executeRetryDelayMs=${SFMC_EXECUTE_RETRY_DELAY_MS}`,
       `bitmessage.url=${BITMESSAGE_API_URL}`,
+      `bitmessage.rawTimeoutMs=${RAW_BITMESSAGE_API_TIMEOUT_MS}`,
+      `bitmessage.effectiveTimeoutMs=${BITMESSAGE_API_TIMEOUT_MS}`,
       `bitmessage.authType=${BITMESSAGE_AUTH_TYPE}`,
       `bitmessage.hasUsername=${Boolean(BITMESSAGE_USERNAME)}`,
       `bitmessage.hasPassword=${Boolean(BITMESSAGE_PASSWORD)}`,

@@ -95,7 +95,12 @@ BASE_URL=https://tu-servicio.onrender.com
 JWT_SECRET=el_jwt_signing_secret_del_installed_package
 
 BITMESSAGE_API_URL=https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
-BITMESSAGE_API_TIMEOUT_MS=10000
+
+SFMC_EXECUTE_TIMEOUT_MS=60000
+SFMC_EXECUTE_RETRY_COUNT=0
+SFMC_EXECUTE_RETRY_DELAY_MS=5000
+BITMESSAGE_API_TIMEOUT_MS=25000
+
 BITMESSAGE_CAMPANYA_REFERENCIA=
 
 BITMESSAGE_AUTH_TYPE=basic
@@ -106,6 +111,28 @@ BITMESSAGE_API_KEY=
 BITMESSAGE_AUTH_HEADER_NAME=
 BITMESSAGE_AUTH_HEADER_VALUE=
 ```
+
+## Timeouts y hard errors en Journey Builder
+
+Journey Builder puede marcar la actividad como hard error si `/execute` tarda demasiado en contestar. Para evitarlo, esta versión separa dos tiempos:
+
+```env
+SFMC_EXECUTE_TIMEOUT_MS=60000
+BITMESSAGE_API_TIMEOUT_MS=25000
+```
+
+`SFMC_EXECUTE_TIMEOUT_MS` es el tiempo máximo que declaramos a Journey Builder para la ejecución de la actividad.
+
+`BITMESSAGE_API_TIMEOUT_MS` es el tiempo máximo que esperamos a BITMessage. Debe ser menor que `SFMC_EXECUTE_TIMEOUT_MS`. Si BITMessage no responde dentro de ese tiempo, la Custom Activity devuelve HTTP 200 a SFMC y enruta el contacto por `No enviado` con `errorCode=TIMEOUT`, en lugar de provocar un hard error.
+
+Los reintentos de Journey Builder están disponibles mediante:
+
+```env
+SFMC_EXECUTE_RETRY_COUNT=0
+SFMC_EXECUTE_RETRY_DELAY_MS=5000
+```
+
+Para SMS se recomienda empezar con `SFMC_EXECUTE_RETRY_COUNT=0`, porque un retry del endpoint `/execute` podría duplicar un mensaje si el proveedor lo procesó pero la respuesta no llegó a tiempo. Sube a `1` solo si aceptas ese riesgo o si tienes un mecanismo de idempotencia externo.
 
 ### Autenticación
 
@@ -174,7 +201,10 @@ Variables mínimas en Render:
 BASE_URL=https://tu-servicio.onrender.com
 JWT_SECRET=valor_del_jwt_signing_secret_de_sfmc
 BITMESSAGE_API_URL=https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
-BITMESSAGE_API_TIMEOUT_MS=10000
+SFMC_EXECUTE_TIMEOUT_MS=60000
+SFMC_EXECUTE_RETRY_COUNT=0
+SFMC_EXECUTE_RETRY_DELAY_MS=5000
+BITMESSAGE_API_TIMEOUT_MS=25000
 BITMESSAGE_AUTH_TYPE=basic
 BITMESSAGE_USERNAME=tu_usuario_bitmessage
 BITMESSAGE_PASSWORD=tu_password_bitmessage
