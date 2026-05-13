@@ -125,3 +125,16 @@ https://TU-SERVICIO.onrender.com/config.json?v=7
 ```
 
 Si ya tenías una versión anterior con `type: REST`, lo recomendable es crear un componente nuevo o cambiar la URL con `?v=7`, guardar, crear una nueva versión de la Journey, eliminar la actividad anterior del canvas y arrastrarla de nuevo.
+
+
+## Orden visual de ramas
+
+Esta versión usa `RESTDECISION` con este orden visual en Journey Builder:
+
+1. Enviado
+2. No enviado
+
+El enrutado real no depende de la posición visual. `/execute` devuelve:
+
+- `outcome: "sent"` y `branchResult: "sent"` cuando BITMessage devuelve `ENVIADO` o `CONFIRMADO`.
+- `outcome: "notSent"` y `branchResult: "notSent"` ante timeout, error de BITMessage, teléfono inválido, campaña vacía o cualquier error controlado.

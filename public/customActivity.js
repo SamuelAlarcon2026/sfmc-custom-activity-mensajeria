@@ -286,20 +286,10 @@
 
     activityPayload.type = 'RESTDECISION';
 
-    // Dejamos No enviado como primer branch de seguridad.
-    // Si SFMC no resolviera el outcome, nunca debe caer por defecto en Enviado.
+    // Orden visual solicitado:
+    // rama superior = Enviado, rama inferior = No enviado.
+    // El enrutado real lo decide /execute devolviendo outcome "sent" o "notSent".
     activityPayload.outcomes = [
-      {
-        key: 'notSent',
-        displayName: 'No enviado',
-        arguments: {
-          branchResult: 'notSent'
-        },
-        metaData: {
-          label: 'No enviado',
-          invalid: false
-        }
-      },
       {
         key: 'sent',
         displayName: 'Enviado',
@@ -308,6 +298,17 @@
         },
         metaData: {
           label: 'Enviado',
+          invalid: false
+        }
+      },
+      {
+        key: 'notSent',
+        displayName: 'No enviado',
+        arguments: {
+          branchResult: 'notSent'
+        },
+        metaData: {
+          label: 'No enviado',
           invalid: false
         }
       }

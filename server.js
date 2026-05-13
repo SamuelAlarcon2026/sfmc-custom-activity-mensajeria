@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-13-restdecision-v7';
+const APP_VERSION = '2026-05-13-restdecision-sent-top-v8';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -160,7 +160,8 @@ app.get('/debug/version', (req, res) => {
         sent: 'sent',
         notSent: 'notSent'
       },
-      safeFallbackFirstBranch: 'notSent',
+      visualTopBranch: 'sent',
+      visualBottomBranch: 'notSent',
       timeoutBranch: 'notSent',
       timestamp: new Date().toISOString()
     });
@@ -278,21 +279,13 @@ function buildConfig() {
     },
     outcomes: [
       /*
-        El primer outcome es No enviado de forma intencionada.
-        Si Journey Builder no pudiera resolver el outcome por cualquier motivo,
-        el fallback visual no debe ser "Enviado".
+        Orden visual solicitado:
+        - Rama superior: Enviado
+        - Rama inferior: No enviado
+
+        El enrutado no depende del orden, sino del outcome devuelto por /execute:
+        "sent" o "notSent".
       */
-      {
-        key: 'notSent',
-        displayName: 'No enviado',
-        arguments: {
-          branchResult: 'notSent'
-        },
-        metaData: {
-          label: 'No enviado',
-          invalid: false
-        }
-      },
       {
         key: 'sent',
         displayName: 'Enviado',
@@ -301,6 +294,17 @@ function buildConfig() {
         },
         metaData: {
           label: 'Enviado',
+          invalid: false
+        }
+      },
+      {
+        key: 'notSent',
+        displayName: 'No enviado',
+        arguments: {
+          branchResult: 'notSent'
+        },
+        metaData: {
+          label: 'No enviado',
           invalid: false
         }
       }
@@ -705,8 +709,8 @@ function buildExecuteResponse(branchResult, values = {}) {
     - La respuesta es JSON plano HTTP 200.
     - "outcome" debe contener la key exacta del outcome: "sent" o "notSent".
     - "branchResult" se conserva como outArgument requerido y usa la misma key.
-    - El primer outcome del config es "notSent", para que cualquier fallback
-      visual o no resuelto no acabe por error en la rama Enviado.
+    - El orden visual del config es "sent" arriba y "notSent" abajo.
+    - El enrutado se controla por el campo "outcome", no por la posición de la rama.
 
     Timeout BITMessage => outcome "notSent" + branchResult "notSent".
   */
