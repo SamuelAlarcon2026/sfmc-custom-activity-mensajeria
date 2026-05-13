@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-13-top-level-branch-v6';
+const APP_VERSION = '2026-05-13-restdecision-v7';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -152,12 +152,16 @@ app.get('/debug/version', (req, res) => {
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     .json({
       version: APP_VERSION,
+      type: 'RESTDECISION',
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
-      outArgumentsShape: 'array:single-object',
-      responseContract: 'top-level-json-branchResult',
-      requiredBranchResult: true,
-      safeFallbackBranch: 'no_enviado',
+      routingContract: 'outcome-key-plus-branchResult',
+      outcomeKeys: {
+        sent: 'sent',
+        notSent: 'notSent'
+      },
+      safeFallbackFirstBranch: 'notSent',
+      timeoutBranch: 'notSent',
       timestamp: new Date().toISOString()
     });
 });
@@ -178,11 +182,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
 function buildConfig() {
   return {
     workflowApiVersion: '1.1',
-    type: 'REST',
+    type: 'RESTDECISION',
     metaData: {
       icon: `${BASE_URL}/images/icon.svg`,
       iconSmall: `${BASE_URL}/images/icon.svg`,
-      category: 'message',
+      category: 'flow',
       isConfigured: false
     },
     lang: {
@@ -214,14 +218,13 @@ function buildConfig() {
         /*
           Para outcomes en Journey Builder, branchResult debe declararse como outArgument
           y /execute debe devolverlo a nivel raíz del JSON:
-          { "branchResult": "enviado" } o { "branchResult": "no_enviado" }.
+          { "branchResult": "sent" } o { "branchResult": "notSent" }.
 
           Se declaran como objetos individuales para que SFMC los registre como
           outArguments independientes.
         */
         outArguments: [
           { branchResult: '' },
-          { outcome: '' },
           { messageStatus: '' },
           { providerMessageId: '' },
           { providerOperatorCode: '' },
@@ -274,25 +277,30 @@ function buildConfig() {
       }
     },
     outcomes: [
+      /*
+        El primer outcome es No enviado de forma intencionada.
+        Si Journey Builder no pudiera resolver el outcome por cualquier motivo,
+        el fallback visual no debe ser "Enviado".
+      */
       {
-        key: 'enviado',
-        displayName: 'Enviado',
+        key: 'notSent',
+        displayName: 'No enviado',
         arguments: {
-          branchResult: 'enviado'
+          branchResult: 'notSent'
         },
         metaData: {
-          label: 'Enviado',
+          label: 'No enviado',
           invalid: false
         }
       },
       {
-        key: 'no_enviado',
-        displayName: 'No enviado',
+        key: 'sent',
+        displayName: 'Enviado',
         arguments: {
-          branchResult: 'no_enviado'
+          branchResult: 'sent'
         },
         metaData: {
-          label: 'No enviado',
+          label: 'Enviado',
           invalid: false
         }
       }
@@ -333,13 +341,6 @@ function buildConfig() {
           outArguments: [
             {
               branchResult: {
-                dataType: 'Text',
-                direction: 'out',
-                access: 'visible'
-              }
-            },
-            {
-              outcome: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
@@ -427,11 +428,14 @@ app.get('/debug/config', (req, res) => {
     .type('text/plain')
     .send([
       `APP_VERSION=${APP_VERSION}`,
+      `activity.type=RESTDECISION`,
+      `routing.outcomeKeys=sent,notSent`,
+      `routing.safeFallbackFirstBranch=notSent`,
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
-      `execute.responseFormat=signed-jwt`,
+      `execute.responseFormat=top-level-json`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
       `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
@@ -452,9 +456,9 @@ app.get('/debug/config', (req, res) => {
 });
 
 app.get('/debug/sample-execute-response', (req, res) => {
-  const branch = String(req.query.branch || 'no_enviado') === 'enviado' ? 'enviado' : 'no_enviado';
+  const branch = ['sent', 'enviado'].includes(String(req.query.branch || 'notSent')) ? 'sent' : 'notSent';
 
-  const sample = buildExecuteResponse(branch, branch === 'enviado'
+  const sample = buildExecuteResponse(branch, branch === 'sent'
     ? {
         messageStatus: 'ENVIADO',
         providerMessageId: 'sample-id',
@@ -682,28 +686,36 @@ function validateServerConfiguration() {
   return errors;
 }
 
+function normalizeRoutingKey(value) {
+  const cleanValue = String(value || '').trim();
+
+  if (['sent', 'enviado', 'ENVIADO', 'CONFIRMADO'].includes(cleanValue)) {
+    return 'sent';
+  }
+
+  return 'notSent';
+}
+
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Contrato usado por Journey Builder para outcomes:
-    - /execute devuelve SIEMPRE HTTP 200 para errores funcionales o del proveedor.
-    - La respuesta es JSON plano.
-    - branchResult va a nivel raíz del JSON, no dentro de outArguments.
-    - Solo BITMessage estado ENVIADO/CONFIRMADO => enviado.
-    - Timeout, HTTP error, estado ERROR, validaciones y excepciones => no_enviado.
+    Contrato de routing para Journey Builder:
 
-    Ejemplo de timeout:
-      {
-        "branchResult": "no_enviado",
-        "messageStatus": "ERROR",
-        "errorCode": "TIMEOUT"
-      }
+    - type = RESTDECISION.
+    - /execute mantiene useJwt=true para validar la llamada entrante de SFMC.
+    - La respuesta es JSON plano HTTP 200.
+    - "outcome" debe contener la key exacta del outcome: "sent" o "notSent".
+    - "branchResult" se conserva como outArgument requerido y usa la misma key.
+    - El primer outcome del config es "notSent", para que cualquier fallback
+      visual o no resuelto no acabe por error en la rama Enviado.
+
+    Timeout BITMessage => outcome "notSent" + branchResult "notSent".
   */
-  const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
+  const routingKey = normalizeRoutingKey(branchResult);
 
   return {
-    branchResult: normalizedBranchResult,
-    outcome: normalizedBranchResult,
-    messageStatus: values.messageStatus || (normalizedBranchResult === 'enviado' ? 'ENVIADO' : 'ERROR'),
+    outcome: routingKey,
+    branchResult: routingKey,
+    messageStatus: values.messageStatus || (routingKey === 'sent' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
     errorCode: values.errorCode || '',
@@ -718,7 +730,8 @@ function buildExecuteResponse(branchResult, values = {}) {
 function sendExecuteResponse(res, payload, reason = '') {
   console.log('[execute-response]', JSON.stringify({
     appVersion: APP_VERSION,
-    responseFormat: 'top-level-json',
+    responseFormat: 'top-level-json-restdecision',
+    outcome: payload.outcome,
     branchResult: payload.branchResult,
     messageStatus: payload.messageStatus,
     errorCode: payload.errorCode,
@@ -733,7 +746,7 @@ function sendExecuteResponse(res, payload, reason = '') {
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
-  return buildExecuteResponse('no_enviado', {
+  return buildExecuteResponse('notSent', {
     messageStatus: error.providerStatus || 'ERROR',
     providerMessageId: error.providerMessageId || '',
     providerOperatorCode: error.providerOperatorCode || '',
@@ -987,7 +1000,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
   */
   const safetyTimeoutMs = Math.max(1000, Math.min(SFMC_EXECUTE_TIMEOUT_MS - 5000, BITMESSAGE_API_TIMEOUT_MS + 2000));
   const safetyTimer = setTimeout(() => {
-    executeResponder.send(buildExecuteResponse('no_enviado', {
+    executeResponder.send(buildExecuteResponse('notSent', {
       messageStatus: 'ERROR',
       errorCode: 'EXECUTE_SAFETY_TIMEOUT',
       errorMessage: `La Custom Activity agotó el tiempo seguro de ejecución (${safetyTimeoutMs} ms) y enruta a No enviado.`,
@@ -1049,7 +1062,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
     });
 
     clearTimeout(safetyTimer);
-    return executeResponder.send(buildExecuteResponse('enviado', {
+    return executeResponder.send(buildExecuteResponse('sent', {
       messageStatus: result.providerStatus || 'ENVIADO',
       providerMessageId: result.providerMessageId,
       providerOperatorCode: result.providerOperatorCode,

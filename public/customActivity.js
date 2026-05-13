@@ -258,7 +258,6 @@
 
     activityPayload.arguments.execute.outArguments = [
       { branchResult: '' },
-      { outcome: '' },
       { messageStatus: '' },
       { providerMessageId: '' },
       { providerOperatorCode: '' },
@@ -276,31 +275,39 @@
     activityPayload.arguments.execute.header = '';
     activityPayload.arguments.execute.format = 'json';
 
-    // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano con branchResult a nivel raíz.
+    // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano.
+    // Para RESTDECISION, "outcome" debe ser "sent" o "notSent".
+    // "branchResult" se mantiene como outArgument para trazabilidad.
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
     activityPayload.arguments.execute.retryCount = activityPayload.arguments.execute.retryCount || 0;
     activityPayload.arguments.execute.retryDelay = activityPayload.arguments.execute.retryDelay || 5000;
 
+    activityPayload.type = 'RESTDECISION';
+
+    // Dejamos No enviado como primer branch de seguridad.
+    // Si SFMC no resolviera el outcome, nunca debe caer por defecto en Enviado.
     activityPayload.outcomes = [
       {
-        key: 'enviado',
-        displayName: 'Enviado',
+        key: 'notSent',
+        displayName: 'No enviado',
         arguments: {
-          branchResult: 'enviado'
+          branchResult: 'notSent'
         },
         metaData: {
+          label: 'No enviado',
           invalid: false
         }
       },
       {
-        key: 'no_enviado',
-        displayName: 'No enviado',
+        key: 'sent',
+        displayName: 'Enviado',
         arguments: {
-          branchResult: 'no_enviado'
+          branchResult: 'sent'
         },
         metaData: {
+          label: 'Enviado',
           invalid: false
         }
       }
