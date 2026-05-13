@@ -257,8 +257,7 @@
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
 
     activityPayload.arguments.execute.outArguments = [
-      { branchResult: '' },
-      { outcome: '' },
+      { branchResult: false },
       { messageStatus: '' },
       { providerMessageId: '' },
       { providerOperatorCode: '' },
@@ -278,9 +277,7 @@
     activityPayload.arguments.execute.format = 'json';
 
     // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano.
-    // Para RESTDECISION devolvemos branchResult como texto:
-    // Enviado    => branchResult "sent"
-    // No enviado => branchResult "notSent".
+    // RESTDECISION enruta comparando branchResult con outcomes[].arguments.branchResult.
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
@@ -289,22 +286,25 @@
 
     activityPayload.type = 'RESTDECISION';
 
-    // Orden visual solicitado:
-    // rama superior = Enviado, rama inferior = No enviado.
-    // El enrutado real lo decide /execute devolviendo:
-    // branchResult = "sent"    => Enviado
-    // branchResult = "notSent" => No enviado
-    //
-    // Importante: arguments se envía como ARRAY de objetos.
-    // En este tenant SFMC estaba aceptando HTTP 200 pero, con arguments como objeto,
-    // no matcheaba la respuesta y caía por la primera rama visual.
-    activityPayload.outcomes = [
+    /*
+      IMPORTANTE:
+      No debemos machacar los outcomes que ya trae Journey Builder porque contienen
+      datos internos del canvas, especialmente `next`, que enlaza cada rama con la
+      siguiente actividad. Si se reemplazan por objetos nuevos, SFMC puede aceptar el
+      200 del execute pero caer por la primera rama visual.
+
+      Aquí solo corregimos key/label/arguments y preservamos cualquier propiedad
+      existente del canvas: next, metaData interna, id, etc.
+    */
+    const existingOutcomes = Array.isArray(activityPayload.outcomes) ? activityPayload.outcomes : [];
+
+    const desiredOutcomes = [
       {
         key: 'sent',
         displayName: 'Enviado',
-        arguments: [
-          { branchResult: 'sent' }
-        ],
+        arguments: {
+          branchResult: true
+        },
         metaData: {
           label: 'Enviado',
           invalid: false
@@ -313,16 +313,35 @@
       {
         key: 'notSent',
         displayName: 'No enviado',
-        arguments: [
-          { branchResult: 'notSent' }
-        ],
+        arguments: {
+          branchResult: false
+        },
         metaData: {
           label: 'No enviado',
           invalid: false
         }
       }
     ];
+
+    activityPayload.outcomes = desiredOutcomes.map((desired, index) => {
+      const existing =
+        existingOutcomes.find((item) => item && item.key === desired.key) ||
+        existingOutcomes[index] ||
+        {};
+
+      return {
+        ...existing,
+        key: desired.key,
+        displayName: desired.displayName,
+        arguments: desired.arguments,
+        metaData: {
+          ...(existing.metaData || {}),
+          ...desired.metaData
+        }
+      };
+    });
   }
+
 
   function saveActivity() {
     if (!validateForm()) {

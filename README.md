@@ -5,7 +5,7 @@ Custom Activity / Custom Split para Salesforce Marketing Cloud Journey Builder q
 ## Versión
 
 ```text
-2026-05-13-debug-trace-v11
+2026-05-13-debug-trace-v14-preserve-outcomes
 ```
 
 Esta versión está preparada para debuggear el problema de routing en Journey Builder. Registra en los logs de Render:
@@ -18,6 +18,29 @@ Esta versión está preparada para debuggear el problema de routing en Journey B
 - respuesta/error/timeout de BITMessage,
 - decisión calculada,
 - JSON exacto devuelto a SFMC.
+
+
+## Cambio crítico v14
+
+Esta versión corrige un problema detectado durante el debug: la UI estaba reemplazando completamente `activityPayload.outcomes` al guardar la actividad. Journey Builder guarda información interna de las ramas dentro de esos outcomes, especialmente `next`, que enlaza cada rama con el siguiente nodo del canvas.
+
+Ahora la UI conserva cualquier propiedad existente de los outcomes y solo actualiza:
+
+```text
+key
+label/displayName
+arguments.branchResult
+```
+
+Esto evita que SFMC acepte HTTP 200 pero caiga siempre por la primera rama visual.
+
+También se añade soporte para:
+
+```env
+APPLICATION_EXTENSION_KEY=
+```
+
+Debe ser el Application Extension Key / External Key del componente Journey Builder Activity del Installed Package.
 
 ## Contrato actual
 
@@ -70,6 +93,7 @@ JWT inválido                    -> No enviado, sin enviar SMS
 ```env
 BASE_URL=https://TU-SERVICIO.onrender.com
 JWT_SECRET=JWT_SIGNING_SECRET_DEL_INSTALLED_PACKAGE
+APPLICATION_EXTENSION_KEY=APPLICATION_EXTENSION_KEY_DEL_COMPONENTE_JOURNEY_BUILDER_ACTIVITY
 NODE_ENV=production
 
 BITMESSAGE_API_URL=https://pre-bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
