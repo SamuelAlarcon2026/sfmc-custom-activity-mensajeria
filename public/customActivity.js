@@ -257,7 +257,7 @@
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
 
     activityPayload.arguments.execute.outArguments = [
-      { branchResult: '' },
+      { branchResult: false },
       { messageStatus: '' },
       { providerMessageId: '' },
       { providerOperatorCode: '' },
@@ -276,8 +276,10 @@
     activityPayload.arguments.execute.format = 'json';
 
     // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano.
-    // Para RESTDECISION, "outcome" debe ser "sent" o "notSent".
-    // "branchResult" se mantiene como outArgument para trazabilidad.
+    // Para RESTDECISION devolvemos branchResult booleano:
+    // Enviado    => branchResult true
+    // No enviado => branchResult false.
+    // Este es el contrato más estable para Journey Builder RESTDECISION.
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
@@ -288,13 +290,13 @@
 
     // Orden visual solicitado:
     // rama superior = Enviado, rama inferior = No enviado.
-    // El enrutado real lo decide /execute devolviendo outcome "sent" o "notSent".
+    // El enrutado real lo decide /execute devolviendo branchResult true o false.
     activityPayload.outcomes = [
       {
         key: 'sent',
         displayName: 'Enviado',
         arguments: {
-          branchResult: 'sent'
+          branchResult: true
         },
         metaData: {
           label: 'Enviado',
@@ -305,7 +307,7 @@
         key: 'notSent',
         displayName: 'No enviado',
         arguments: {
-          branchResult: 'notSent'
+          branchResult: false
         },
         metaData: {
           label: 'No enviado',

@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-13-restdecision-sent-top-v8';
+const APP_VERSION = '2026-05-13-restdecision-boolean-branch-v10';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -155,14 +155,14 @@ app.get('/debug/version', (req, res) => {
       type: 'RESTDECISION',
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
-      routingContract: 'outcome-key-plus-branchResult',
-      outcomeKeys: {
-        sent: 'sent',
-        notSent: 'notSent'
+      routingContract: 'top-level-boolean-branchResult-match-outcomes-arguments',
+      branchResultValues: {
+        sent: true,
+        notSent: false
       },
-      visualTopBranch: 'sent',
-      visualBottomBranch: 'notSent',
-      timeoutBranch: 'notSent',
+      visualTopBranch: 'Enviado / branchResult true',
+      visualBottomBranch: 'No enviado / branchResult false',
+      timeoutBranch: 'No enviado / branchResult false',
       timestamp: new Date().toISOString()
     });
 });
@@ -217,15 +217,18 @@ function buildConfig() {
           { campanyaReferencia: '' }
         ],
         /*
-          Para outcomes en Journey Builder, branchResult debe declararse como outArgument
-          y /execute debe devolverlo a nivel raíz del JSON:
-          { "branchResult": "sent" } o { "branchResult": "notSent" }.
+          RESTDECISION:
+          Journey Builder evalúa los outcomes comparando los outArguments
+          devueltos por /execute contra outcomes[].arguments.
 
-          Se declaran como objetos individuales para que SFMC los registre como
-          outArguments independientes.
+          Para evitar que SFMC trate valores de texto/número como strings no
+          coincidentes y caiga en la primera rama, branchResult se devuelve como
+          booleano:
+          - true  => Enviado
+          - false => No enviado
         */
         outArguments: [
-          { branchResult: '' },
+          { branchResult: false },
           { messageStatus: '' },
           { providerMessageId: '' },
           { providerOperatorCode: '' },
@@ -283,14 +286,15 @@ function buildConfig() {
         - Rama superior: Enviado
         - Rama inferior: No enviado
 
-        El enrutado no depende del orden, sino del outcome devuelto por /execute:
-        "sent" o "notSent".
+        El enrutado no depende del orden, sino del valor booleano devuelto por /execute:
+        true  => Enviado
+        false => No enviado.
       */
       {
         key: 'sent',
         displayName: 'Enviado',
         arguments: {
-          branchResult: 'sent'
+          branchResult: true
         },
         metaData: {
           label: 'Enviado',
@@ -301,7 +305,7 @@ function buildConfig() {
         key: 'notSent',
         displayName: 'No enviado',
         arguments: {
-          branchResult: 'notSent'
+          branchResult: false
         },
         metaData: {
           label: 'No enviado',
@@ -345,7 +349,7 @@ function buildConfig() {
           outArguments: [
             {
               branchResult: {
-                dataType: 'Text',
+                dataType: 'Boolean',
                 direction: 'out',
                 access: 'visible'
               }
@@ -434,12 +438,13 @@ app.get('/debug/config', (req, res) => {
       `APP_VERSION=${APP_VERSION}`,
       `activity.type=RESTDECISION`,
       `routing.outcomeKeys=sent,notSent`,
-      `routing.safeFallbackFirstBranch=notSent`,
+      `routing.branchResult.sent=true`,
+      `routing.branchResult.notSent=false`,
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
-      `execute.responseFormat=top-level-json`,
+      `execute.responseFormat=top-level-json branchResult=true|false`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
       `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
@@ -691,13 +696,21 @@ function validateServerConfiguration() {
 }
 
 function normalizeRoutingKey(value) {
-  const cleanValue = String(value || '').trim();
+  const cleanValue = String(value || '').trim().toLowerCase();
 
-  if (['sent', 'enviado', 'ENVIADO', 'CONFIRMADO'].includes(cleanValue)) {
+  if (value === true || ['true', 'sent', 'enviado', 'enviada', 'enviado_ok', 'ok', 'enviado_correcto', 'enviado_correctamente', 'enviado/success', 'success', 'enviado-confirmado', 'confirmado', 'enviado_confirmado', 'enviado / confirmado', 'enviado o confirmado', 'enviado_confirmado'].includes(cleanValue)) {
+    return 'sent';
+  }
+
+  if (['enviado', 'confirmado'].includes(String(value || '').trim().toUpperCase())) {
     return 'sent';
   }
 
   return 'notSent';
+}
+
+function branchResultBooleanFromRoutingKey(routingKey) {
+  return routingKey === 'sent';
 }
 
 function buildExecuteResponse(branchResult, values = {}) {
@@ -707,18 +720,18 @@ function buildExecuteResponse(branchResult, values = {}) {
     - type = RESTDECISION.
     - /execute mantiene useJwt=true para validar la llamada entrante de SFMC.
     - La respuesta es JSON plano HTTP 200.
-    - "outcome" debe contener la key exacta del outcome: "sent" o "notSent".
-    - "branchResult" se conserva como outArgument requerido y usa la misma key.
-    - El orden visual del config es "sent" arriba y "notSent" abajo.
-    - El enrutado se controla por el campo "outcome", no por la posición de la rama.
+    - Journey Builder enruta comparando branchResult con outcomes[].arguments.
+    - branchResult DEBE ser booleano:
+      true  => Enviado
+      false => No enviado
 
-    Timeout BITMessage => outcome "notSent" + branchResult "notSent".
+    Timeout BITMessage => branchResult false.
   */
   const routingKey = normalizeRoutingKey(branchResult);
+  const branchResultBoolean = branchResultBooleanFromRoutingKey(routingKey);
 
   return {
-    outcome: routingKey,
-    branchResult: routingKey,
+    branchResult: branchResultBoolean,
     messageStatus: values.messageStatus || (routingKey === 'sent' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
@@ -734,8 +747,7 @@ function buildExecuteResponse(branchResult, values = {}) {
 function sendExecuteResponse(res, payload, reason = '') {
   console.log('[execute-response]', JSON.stringify({
     appVersion: APP_VERSION,
-    responseFormat: 'top-level-json-restdecision',
-    outcome: payload.outcome,
+    responseFormat: 'top-level-json-restdecision-boolean',
     branchResult: payload.branchResult,
     messageStatus: payload.messageStatus,
     errorCode: payload.errorCode,

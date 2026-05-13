@@ -138,3 +138,30 @@ El enrutado real no depende de la posición visual. `/execute` devuelve:
 
 - `outcome: "sent"` y `branchResult: "sent"` cuando BITMessage devuelve `ENVIADO` o `CONFIRMADO`.
 - `outcome: "notSent"` y `branchResult: "notSent"` ante timeout, error de BITMessage, teléfono inválido, campaña vacía o cualquier error controlado.
+
+
+## v9 - Routing numérico para RESTDECISION
+
+Esta versión evita que Journey Builder enrute por defecto por la primera rama cuando el proveedor falla.
+
+Contrato de salida de `/execute`:
+
+- Enviado: `branchResult = "0"` y `outcome = "sent"`
+- No enviado: `branchResult = "1"` y `outcome = "notSent"`
+
+El orden visual se mantiene:
+
+1. Rama superior: Enviado
+2. Rama inferior: No enviado
+
+Timeout de BITMessage, errores HTTP, errores funcionales, teléfono inválido o campaña vacía devuelven HTTP 200 con `branchResult = "1"`.
+
+
+## v10 - Routing RESTDECISION booleano
+
+Esta versión enruta con `branchResult` booleano a nivel raíz de la respuesta `/execute`:
+
+- `branchResult: true` -> Enviado
+- `branchResult: false` -> No enviado
+
+Timeouts, errores de BITMessage, teléfonos inválidos y errores funcionales devuelven HTTP 200 con `branchResult: false` para que Journey Builder no pierda el contacto y lo mande por la rama inferior No enviado.
