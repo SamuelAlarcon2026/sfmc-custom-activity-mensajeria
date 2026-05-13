@@ -459,3 +459,10 @@ Después de desplegar esta versión, elimina la actividad del canvas de Journey 
 `/debug/sample-execute-response` muestra el payload JSON antes de firmarlo.
 
 `/debug/sample-execute-response.jwt` muestra el JWT firmado que usa el mismo contrato de respuesta que `/execute`.
+
+
+## Versión 2026-05-13-top-level-branch-v6
+
+La respuesta de `/execute` usa JSON plano con `branchResult` a nivel raíz para enrutar outcomes en Journey Builder. `useJwt` se mantiene activo para validar la petición de SFMC, pero la respuesta no se firma como JWT.
+
+Timeout de BITMessage => HTTP 200 a SFMC con `branchResult=no_enviado`, `messageStatus=ERROR`, `errorCode=TIMEOUT`.

@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-12-jwt-response-v5';
+const APP_VERSION = '2026-05-13-top-level-branch-v6';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -153,9 +153,9 @@ app.get('/debug/version', (req, res) => {
     .json({
       version: APP_VERSION,
       executeUseJwt: true,
-      executeResponseFormat: 'signed-jwt',
+      executeResponseFormat: 'top-level-json',
       outArgumentsShape: 'array:single-object',
-      responseContract: 'signed-jwt-with-outArguments',
+      responseContract: 'top-level-json-branchResult',
       requiredBranchResult: true,
       safeFallbackBranch: 'no_enviado',
       timestamp: new Date().toISOString()
@@ -212,25 +212,25 @@ function buildConfig() {
           { campanyaReferencia: '' }
         ],
         /*
-          IMPORTANTE:
-          Journey Builder valida los outArguments como un único objeto.
-          Si se devuelven como objetos separados, algunos tenants pueden marcar:
-          "The REST response does not contain a required outArgument (branchResult)".
+          Para outcomes en Journey Builder, branchResult debe declararse como outArgument
+          y /execute debe devolverlo a nivel raíz del JSON:
+          { "branchResult": "enviado" } o { "branchResult": "no_enviado" }.
+
+          Se declaran como objetos individuales para que SFMC los registre como
+          outArguments independientes.
         */
         outArguments: [
-          {
-            outcome: '',
-            branchResult: '',
-            messageStatus: '',
-            providerMessageId: '',
-            providerOperatorCode: '',
-            errorCode: '',
-            errorMessage: '',
-            providerResponse: '',
-            phoneSent: '',
-            campaignReference: '',
-            sentAt: ''
-          }
+          { branchResult: '' },
+          { outcome: '' },
+          { messageStatus: '' },
+          { providerMessageId: '' },
+          { providerOperatorCode: '' },
+          { errorCode: '' },
+          { errorMessage: '' },
+          { providerResponse: '' },
+          { phoneSent: '' },
+          { campaignReference: '' },
+          { sentAt: '' }
         ],
         url: `${BASE_URL}/execute`,
         verb: 'POST',
@@ -281,6 +281,7 @@ function buildConfig() {
           branchResult: 'enviado'
         },
         metaData: {
+          label: 'Enviado',
           invalid: false
         }
       },
@@ -291,6 +292,7 @@ function buildConfig() {
           branchResult: 'no_enviado'
         },
         metaData: {
+          label: 'No enviado',
           invalid: false
         }
       }
@@ -330,56 +332,76 @@ function buildConfig() {
           ],
           outArguments: [
             {
-              outcome: {
-                dataType: 'Text',
-                direction: 'out',
-                access: 'visible'
-              },
               branchResult: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
+              outcome: {
+                dataType: 'Text',
+                direction: 'out',
+                access: 'visible'
+              }
+            },
+            {
               messageStatus: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerMessageId: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerOperatorCode: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               errorCode: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               errorMessage: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerResponse: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               phoneSent: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               campaignReference: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               sentAt: {
                 dataType: 'Text',
                 direction: 'out',
@@ -454,42 +476,6 @@ app.get('/debug/sample-execute-response', (req, res) => {
     .type('application/json')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     .send(JSON.stringify(sample, null, 2));
-});
-
-app.get('/debug/sample-execute-response.jwt', (req, res) => {
-  const branch = String(req.query.branch || 'no_enviado') === 'enviado' ? 'enviado' : 'no_enviado';
-
-  const sample = buildExecuteResponse(branch, branch === 'enviado'
-    ? {
-        messageStatus: 'ENVIADO',
-        providerMessageId: 'sample-id',
-        providerOperatorCode: 'sample-operator-code',
-        phoneSent: '34644614672',
-        campaignReference: 'PRE-IBSALUT',
-        sentAt: new Date().toISOString()
-      }
-    : {
-        messageStatus: 'ERROR',
-        errorCode: 'TIMEOUT',
-        errorMessage: 'Respuesta JWT de ejemplo para Journey Builder.',
-        phoneSent: '34644614672',
-        campaignReference: 'PRE-IBSALUT',
-        sentAt: new Date().toISOString()
-      });
-
-  try {
-    const token = signExecuteResponsePayload(sample);
-    return res
-      .status(200)
-      .set('Content-Type', 'application/jwt; charset=utf-8')
-      .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-      .send(token);
-  } catch (error) {
-    return res.status(500).json({
-      error: error.code || 'JWT_SIGN_ERROR',
-      message: error.message
-    });
-  }
 });
 
 const rawBodyParser = express.text({
@@ -698,30 +684,23 @@ function validateServerConfiguration() {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Contrato correcto con execute.useJwt=true:
+    Contrato usado por Journey Builder para outcomes:
+    - /execute devuelve SIEMPRE HTTP 200 para errores funcionales o del proveedor.
+    - La respuesta es JSON plano.
+    - branchResult va a nivel raíz del JSON, no dentro de outArguments.
+    - Solo BITMessage estado ENVIADO/CONFIRMADO => enviado.
+    - Timeout, HTTP error, estado ERROR, validaciones y excepciones => no_enviado.
 
-    Journey Builder firma la petición a /execute con JWT y también espera que
-    cualquier dato devuelto por /execute venga firmado con el mismo JWT Signing Secret.
-
-    Por eso la respuesta HTTP no debe ser JSON plano. Debe ser un JWT cuyo payload
-    contiene outArguments. El payload firmado es:
-
+    Ejemplo de timeout:
       {
-        "outArguments": [
-          {
-            "branchResult": "enviado" | "no_enviado",
-            ...
-          }
-        ]
+        "branchResult": "no_enviado",
+        "messageStatus": "ERROR",
+        "errorCode": "TIMEOUT"
       }
-
-    Regla de negocio:
-    - Solo estado ENVIADO/CONFIRMADO de BITMessage => enviado.
-    - Cualquier error, timeout, HTTP error, teléfono inválido, campaña vacía, excepción => no_enviado.
   */
   const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
 
-  const output = {
+  return {
     branchResult: normalizedBranchResult,
     outcome: normalizedBranchResult,
     messageStatus: values.messageStatus || (normalizedBranchResult === 'enviado' ? 'ENVIADO' : 'ERROR'),
@@ -734,48 +713,23 @@ function buildExecuteResponse(branchResult, values = {}) {
     campaignReference: values.campaignReference || '',
     sentAt: values.sentAt || new Date().toISOString()
   };
-
-  return {
-    outArguments: [
-      output
-    ]
-  };
-}
-
-function signExecuteResponsePayload(payload) {
-  if (!JWT_SECRET) {
-    const error = new Error('JWT_SECRET no está configurado. No se puede firmar la respuesta de /execute.');
-    error.code = 'MISSING_JWT_SECRET';
-    throw error;
-  }
-
-  return jwt.sign(payload, JWT_SECRET, {
-    algorithm: 'HS256',
-    noTimestamp: false
-  });
 }
 
 function sendExecuteResponse(res, payload, reason = '') {
-  const output = Array.isArray(payload?.outArguments) ? payload.outArguments[0] || {} : {};
-  const token = signExecuteResponsePayload(payload);
-
   console.log('[execute-response]', JSON.stringify({
     appVersion: APP_VERSION,
-    responseFormat: 'signed-jwt',
-    branchResult: output.branchResult,
-    outArgumentsBranchResult: output.branchResult,
-    outArgumentsShape: Array.isArray(payload.outArguments) ? `array:${payload.outArguments.length}` : typeof payload.outArguments,
-    messageStatus: output.messageStatus,
-    errorCode: output.errorCode,
-    reason,
-    jwtBytes: Buffer.byteLength(token)
+    responseFormat: 'top-level-json',
+    branchResult: payload.branchResult,
+    messageStatus: payload.messageStatus,
+    errorCode: payload.errorCode,
+    reason
   }));
 
   return res
     .status(200)
-    .set('Content-Type', 'application/jwt; charset=utf-8')
+    .type('application/json')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-    .send(token);
+    .json(payload);
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
@@ -1012,7 +966,7 @@ function createExecuteResponder(res) {
         console.warn('[execute-response-skipped]', JSON.stringify({
           appVersion: APP_VERSION,
           reason,
-          branchResult: payload?.outArguments?.[0]?.branchResult
+          branchResult: payload?.branchResult
         }));
         return;
       }

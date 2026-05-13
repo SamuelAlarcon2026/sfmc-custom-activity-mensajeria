@@ -257,19 +257,17 @@
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
 
     activityPayload.arguments.execute.outArguments = [
-      {
-        branchResult: '',
-        outcome: '',
-        messageStatus: '',
-        providerMessageId: '',
-        providerOperatorCode: '',
-        errorCode: '',
-        errorMessage: '',
-        providerResponse: '',
-        phoneSent: '',
-        campaignReference: '',
-        sentAt: ''
-      }
+      { branchResult: '' },
+      { outcome: '' },
+      { messageStatus: '' },
+      { providerMessageId: '' },
+      { providerOperatorCode: '' },
+      { errorCode: '' },
+      { errorMessage: '' },
+      { providerResponse: '' },
+      { phoneSent: '' },
+      { campaignReference: '' },
+      { sentAt: '' }
     ];
 
     activityPayload.arguments.execute.url = activityPayload.arguments.execute.url || `${origin}/execute`;
@@ -278,7 +276,7 @@
     activityPayload.arguments.execute.header = '';
     activityPayload.arguments.execute.format = 'json';
 
-    // /execute debe estar firmado por SFMC. Como useJwt=true, el backend devuelve los outArguments firmados en JWT.
+    // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano con branchResult a nivel raíz.
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
