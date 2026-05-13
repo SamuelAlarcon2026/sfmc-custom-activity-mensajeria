@@ -15,7 +15,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-13-debug-trace-v11';
+const APP_VERSION = '2026-05-13-restdecision-arguments-array-v12';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -164,6 +164,10 @@ function safeSfmcPayload(payload) {
   return {
     keys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
     hasInArguments: Boolean(payload?.inArguments || payload?.arguments?.execute?.inArguments),
+    hasOutArguments: Boolean(payload?.outArguments || payload?.arguments?.execute?.outArguments),
+    outArguments: Array.isArray(payload?.outArguments)
+      ? payload.outArguments
+      : (Array.isArray(payload?.arguments?.execute?.outArguments) ? payload.arguments.execute.outArguments : []),
     inArguments: {
       contactKey: args.contactKey || '',
       to: args.to || '',
@@ -290,14 +294,15 @@ app.get('/debug/version', (req, res) => {
       type: 'RESTDECISION',
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
-      routingContract: 'debug-trace-top-level-branchResult',
+      routingContract: 'outcomes-arguments-array-top-level-branchResult',
       branchResultValues: {
-        sent: true,
-        notSent: false
+        sent: 'sent',
+        notSent: 'notSent'
       },
-      visualTopBranch: 'Enviado / branchResult true',
-      visualBottomBranch: 'No enviado / branchResult false',
-      timeoutBranch: 'No enviado / branchResult false',
+      outcomesArgumentsShape: 'array',
+      visualTopBranch: 'Enviado / branchResult sent',
+      visualBottomBranch: 'No enviado / branchResult notSent',
+      timeoutBranch: 'No enviado / branchResult notSent',
       debug: {
         executeLogs: DEBUG_EXECUTE_LOGS,
         logFullMessage: DEBUG_LOG_FULL_MESSAGE,
@@ -362,17 +367,24 @@ function buildConfig() {
         ],
         /*
           RESTDECISION:
-          Journey Builder evalúa los outcomes comparando los outArguments
-          devueltos por /execute contra outcomes[].arguments.
+          Journey Builder enruta comparando los outArguments devueltos por
+          /execute contra outcomes[].arguments.
 
-          Para evitar que SFMC trate valores de texto/número como strings no
-          coincidentes y caiga en la primera rama, branchResult se devuelve como
-          booleano:
-          - true  => Enviado
-          - false => No enviado
+          En este tenant el body top-level ya se parsea correctamente, pero
+          el matching de outcome no estaba respetando valores booleanos/numéricos.
+          Por eso se usa un valor Text explícito y estable:
+
+          - branchResult = "sent"    => Enviado
+          - branchResult = "notSent" => No enviado
+
+          Importante: outcomes[].arguments se declara como array de objetos,
+          igual que inArguments/outArguments. En varios tenants de SFMC, cuando
+          outcomes[].arguments se envía como objeto plano, no matchea y cae
+          por la primera rama visual aunque /execute devuelva HTTP 200.
         */
         outArguments: [
-          { branchResult: false },
+          { branchResult: '' },
+          { outcome: '' },
           { messageStatus: '' },
           { providerMessageId: '' },
           { providerOperatorCode: '' },
@@ -431,16 +443,20 @@ function buildConfig() {
         - Rama superior: Enviado
         - Rama inferior: No enviado
 
-        El enrutado no depende del orden, sino del valor booleano devuelto por /execute:
-        true  => Enviado
-        false => No enviado.
+        El routing real lo decide /execute con branchResult:
+        - "sent"    => Enviado
+        - "notSent" => No enviado
+
+        La forma de arguments es ARRAY. Esto evita el caso observado donde
+        SFMC acepta HTTP 200 pero no matchea outcomes[].arguments y cae por
+        la primera rama visual.
       */
       {
         key: 'sent',
         displayName: 'Enviado',
-        arguments: {
-          branchResult: true
-        },
+        arguments: [
+          { branchResult: 'sent' }
+        ],
         metaData: {
           label: 'Enviado',
           invalid: false
@@ -449,9 +465,9 @@ function buildConfig() {
       {
         key: 'notSent',
         displayName: 'No enviado',
-        arguments: {
-          branchResult: false
-        },
+        arguments: [
+          { branchResult: 'notSent' }
+        ],
         metaData: {
           label: 'No enviado',
           invalid: false
@@ -494,7 +510,14 @@ function buildConfig() {
           outArguments: [
             {
               branchResult: {
-                dataType: 'Boolean',
+                dataType: 'Text',
+                direction: 'out',
+                access: 'visible'
+              }
+            },
+            {
+              outcome: {
+                dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
               }
@@ -590,13 +613,14 @@ app.get('/debug/config', (req, res) => {
       `APP_VERSION=${APP_VERSION}`,
       `activity.type=RESTDECISION`,
       `routing.outcomeKeys=sent,notSent`,
-      `routing.branchResult.sent=true`,
-      `routing.branchResult.notSent=false`,
+      `routing.branchResult.sent=sent`,
+      `routing.branchResult.notSent=notSent`,
+      `routing.outcomes.arguments.shape=array`,
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
-      `execute.responseFormat=top-level-json branchResult=true|false`,
+      `execute.responseFormat=top-level-json branchResult=sent|notSent`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
       `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
@@ -902,29 +926,31 @@ function normalizeRoutingKey(value) {
   return 'notSent';
 }
 
-function branchResultBooleanFromRoutingKey(routingKey) {
-  return routingKey === 'sent';
+function branchResultValueFromRoutingKey(routingKey) {
+  return routingKey === 'sent' ? 'sent' : 'notSent';
 }
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Contrato de routing para Journey Builder:
+    Contrato de routing para Journey Builder RESTDECISION:
 
-    - type = RESTDECISION.
     - /execute mantiene useJwt=true para validar la llamada entrante de SFMC.
     - La respuesta es JSON plano HTTP 200.
-    - Journey Builder enruta comparando branchResult con outcomes[].arguments.
-    - branchResult DEBE ser booleano:
-      true  => Enviado
-      false => No enviado
+    - El campo de routing es branchResult a nivel raíz.
+    - branchResult es TEXT y debe matchear outcomes[].arguments:
+      "sent"    => Enviado
+      "notSent" => No enviado
+    - El config declara outcomes[].arguments como ARRAY de objetos:
+      arguments: [{ branchResult: "notSent" }]
 
-    Timeout BITMessage => branchResult false.
+    Timeout BITMessage => branchResult "notSent".
   */
   const routingKey = normalizeRoutingKey(branchResult);
-  const branchResultBoolean = branchResultBooleanFromRoutingKey(routingKey);
+  const branchResultValue = branchResultValueFromRoutingKey(routingKey);
 
   return {
-    branchResult: branchResultBoolean,
+    branchResult: branchResultValue,
+    outcome: routingKey,
     messageStatus: values.messageStatus || (routingKey === 'sent' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
@@ -945,7 +971,7 @@ function sendExecuteResponse(res, payload, reason = '') {
 
   const debugSummary = {
     appVersion: APP_VERSION,
-    responseFormat: 'top-level-json-restdecision-boolean',
+    responseFormat: 'top-level-json-restdecision-arguments-array',
     httpStatusReturnedToSfmc: 200,
     contentTypeReturnedToSfmc: 'application/json',
     branchResult: responsePayload.branchResult,
@@ -1456,7 +1482,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'jwt-error',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1466,7 +1492,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-jwt-error',
       routingDecision: {
         reason: 'jwt-error',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1510,7 +1536,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-to',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1520,7 +1546,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-to',
       routingDecision: {
         reason: 'missing-to',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1544,7 +1570,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-message',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1554,7 +1580,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-message',
       routingDecision: {
         reason: 'missing-message',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1577,7 +1603,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-campanya-referencia',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1587,7 +1613,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-campaign',
       routingDecision: {
         reason: 'missing-campanya-referencia',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,

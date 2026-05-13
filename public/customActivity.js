@@ -257,7 +257,8 @@
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
 
     activityPayload.arguments.execute.outArguments = [
-      { branchResult: false },
+      { branchResult: '' },
+      { outcome: '' },
       { messageStatus: '' },
       { providerMessageId: '' },
       { providerOperatorCode: '' },
@@ -266,7 +267,8 @@
       { providerResponse: '' },
       { phoneSent: '' },
       { campaignReference: '' },
-      { sentAt: '' }
+      { sentAt: '' },
+      { debugRequestId: '' }
     ];
 
     activityPayload.arguments.execute.url = activityPayload.arguments.execute.url || `${origin}/execute`;
@@ -276,10 +278,9 @@
     activityPayload.arguments.execute.format = 'json';
 
     // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano.
-    // Para RESTDECISION devolvemos branchResult booleano:
-    // Enviado    => branchResult true
-    // No enviado => branchResult false.
-    // Este es el contrato más estable para Journey Builder RESTDECISION.
+    // Para RESTDECISION devolvemos branchResult como texto:
+    // Enviado    => branchResult "sent"
+    // No enviado => branchResult "notSent".
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
@@ -290,14 +291,20 @@
 
     // Orden visual solicitado:
     // rama superior = Enviado, rama inferior = No enviado.
-    // El enrutado real lo decide /execute devolviendo branchResult true o false.
+    // El enrutado real lo decide /execute devolviendo:
+    // branchResult = "sent"    => Enviado
+    // branchResult = "notSent" => No enviado
+    //
+    // Importante: arguments se envía como ARRAY de objetos.
+    // En este tenant SFMC estaba aceptando HTTP 200 pero, con arguments como objeto,
+    // no matcheaba la respuesta y caía por la primera rama visual.
     activityPayload.outcomes = [
       {
         key: 'sent',
         displayName: 'Enviado',
-        arguments: {
-          branchResult: true
-        },
+        arguments: [
+          { branchResult: 'sent' }
+        ],
         metaData: {
           label: 'Enviado',
           invalid: false
@@ -306,9 +313,9 @@
       {
         key: 'notSent',
         displayName: 'No enviado',
-        arguments: {
-          branchResult: false
-        },
+        arguments: [
+          { branchResult: 'notSent' }
+        ],
         metaData: {
           label: 'No enviado',
           invalid: false
