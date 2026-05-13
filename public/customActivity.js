@@ -278,7 +278,7 @@
     activityPayload.arguments.execute.header = '';
     activityPayload.arguments.execute.format = 'json';
 
-    // /execute debe estar firmado por SFMC. La respuesta sigue siendo JSON plano con outArguments.
+    // /execute debe estar firmado por SFMC. Como useJwt=true, el backend devuelve los outArguments firmados en JWT.
     activityPayload.arguments.execute.useJwt = true;
 
     activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;

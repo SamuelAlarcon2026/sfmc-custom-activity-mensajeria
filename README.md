@@ -17,21 +17,27 @@ La actividad:
 - Enruta al contacto por dos ramas:
   - `Enviado`
   - `No enviado`
-- Devuelve outArguments para registrar errores y respuesta del proveedor.
+- Devuelve outArguments firmados por JWT para registrar errores y respuesta del proveedor.
 
 
 ## Diferencia entre Success y Enviado
 
 En Journey Builder, el contador `Successes` significa que el endpoint `/execute` respondió correctamente a SFMC con HTTP 200. No significa necesariamente que BITMessage haya enviado el SMS.
 
-La decisión real de la rama se devuelve ahora de forma explícita con:
+La decisión real de la rama se devuelve mediante el outArgument `branchResult`.
+
+Como `execute.useJwt=true`, Journey Builder espera que la respuesta con los `outArguments` esté firmada con el mismo `JWT_SECRET` del Installed Package. Por eso `/execute` devuelve un JWT firmado cuyo payload interno es:
 
 ```json
 {
-  "outcome": "no_enviado",
-  "branchResult": "no_enviado",
-  "messageStatus": "ERROR",
-  "errorCode": "TIMEOUT"
+  "outArguments": [
+    {
+      "branchResult": "no_enviado",
+      "outcome": "no_enviado",
+      "messageStatus": "ERROR",
+      "errorCode": "TIMEOUT"
+    }
+  ]
 }
 ```
 
@@ -39,13 +45,17 @@ o:
 
 ```json
 {
-  "outcome": "enviado",
-  "branchResult": "enviado",
-  "messageStatus": "ENVIADO"
+  "outArguments": [
+    {
+      "branchResult": "enviado",
+      "outcome": "enviado",
+      "messageStatus": "ENVIADO"
+    }
+  ]
 }
 ```
 
-Esto evita que Journey Builder tome la primera rama por defecto cuando el proveedor no responde o devuelve error.
+Esto evita el error `Can't parse returned data required for the REST activity` cuando SFMC espera una respuesta JWT y recibe JSON plano.
 
 ## Payload enviado a BITMessage
 
@@ -434,3 +444,18 @@ Después de desplegar esta versión, elimina la actividad del canvas de Journey 
 ## Versión JWT Secure v4
 
 `/execute` usa `useJwt: true`. Journey Builder firma la petición con el JWT Signing Secret del Installed Package. La respuesta sigue siendo JSON plano con `outArguments`, incluyendo siempre `branchResult`. Cualquier error funcional, timeout de BITMessage o error de proveedor enruta a `no_enviado`; solo `ENVIADO` o `CONFIRMADO` enruta a `enviado`.
+
+
+## Endpoints de diagnóstico
+
+```text
+/health
+/debug/version
+/debug/config
+/debug/sample-execute-response?branch=no_enviado
+/debug/sample-execute-response.jwt?branch=no_enviado
+```
+
+`/debug/sample-execute-response` muestra el payload JSON antes de firmarlo.
+
+`/debug/sample-execute-response.jwt` muestra el JWT firmado que usa el mismo contrato de respuesta que `/execute`.

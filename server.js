@@ -14,7 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-12-jwt-secure-v4';
+const APP_VERSION = '2026-05-12-jwt-response-v5';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -153,8 +153,9 @@ app.get('/debug/version', (req, res) => {
     .json({
       version: APP_VERSION,
       executeUseJwt: true,
+      executeResponseFormat: 'signed-jwt',
       outArgumentsShape: 'array:single-object',
-      responseContract: 'jwt-request-plain-json-omni-outArguments',
+      responseContract: 'signed-jwt-with-outArguments',
       requiredBranchResult: true,
       safeFallbackBranch: 'no_enviado',
       timestamp: new Date().toISOString()
@@ -277,7 +278,6 @@ function buildConfig() {
         key: 'enviado',
         displayName: 'Enviado',
         arguments: {
-          outcome: 'enviado',
           branchResult: 'enviado'
         },
         metaData: {
@@ -288,7 +288,6 @@ function buildConfig() {
         key: 'no_enviado',
         displayName: 'No enviado',
         arguments: {
-          outcome: 'no_enviado',
           branchResult: 'no_enviado'
         },
         metaData: {
@@ -410,6 +409,7 @@ app.get('/debug/config', (req, res) => {
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
+      `execute.responseFormat=signed-jwt`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
       `sfmc.executeRetryCount=${SFMC_EXECUTE_RETRY_COUNT}`,
@@ -454,6 +454,42 @@ app.get('/debug/sample-execute-response', (req, res) => {
     .type('application/json')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     .send(JSON.stringify(sample, null, 2));
+});
+
+app.get('/debug/sample-execute-response.jwt', (req, res) => {
+  const branch = String(req.query.branch || 'no_enviado') === 'enviado' ? 'enviado' : 'no_enviado';
+
+  const sample = buildExecuteResponse(branch, branch === 'enviado'
+    ? {
+        messageStatus: 'ENVIADO',
+        providerMessageId: 'sample-id',
+        providerOperatorCode: 'sample-operator-code',
+        phoneSent: '34644614672',
+        campaignReference: 'PRE-IBSALUT',
+        sentAt: new Date().toISOString()
+      }
+    : {
+        messageStatus: 'ERROR',
+        errorCode: 'TIMEOUT',
+        errorMessage: 'Respuesta JWT de ejemplo para Journey Builder.',
+        phoneSent: '34644614672',
+        campaignReference: 'PRE-IBSALUT',
+        sentAt: new Date().toISOString()
+      });
+
+  try {
+    const token = signExecuteResponsePayload(sample);
+    return res
+      .status(200)
+      .set('Content-Type', 'application/jwt; charset=utf-8')
+      .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+      .send(token);
+  } catch (error) {
+    return res.status(500).json({
+      error: error.code || 'JWT_SIGN_ERROR',
+      message: error.message
+    });
+  }
 });
 
 const rawBodyParser = express.text({
@@ -662,13 +698,26 @@ function validateServerConfiguration() {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Contrato seguro para Journey Builder:
-    - /execute responde SIEMPRE HTTP 200 ante errores funcionales o del proveedor.
-    - Cualquier error de envío se convierte en branchResult=no_enviado.
-    - Solo BITMessage estado ENVIADO/CONFIRMADO se convierte en branchResult=enviado.
-    - La petición de SFMC debe venir firmada por JWT.
-    - La respuesta a SFMC es JSON plano con outArguments.
-    - Incluimos branchResult también en raíz para compatibilidad con tenants que validan top-level.
+    Contrato correcto con execute.useJwt=true:
+
+    Journey Builder firma la petición a /execute con JWT y también espera que
+    cualquier dato devuelto por /execute venga firmado con el mismo JWT Signing Secret.
+
+    Por eso la respuesta HTTP no debe ser JSON plano. Debe ser un JWT cuyo payload
+    contiene outArguments. El payload firmado es:
+
+      {
+        "outArguments": [
+          {
+            "branchResult": "enviado" | "no_enviado",
+            ...
+          }
+        ]
+      }
+
+    Regla de negocio:
+    - Solo estado ENVIADO/CONFIRMADO de BITMessage => enviado.
+    - Cualquier error, timeout, HTTP error, teléfono inválido, campaña vacía, excepción => no_enviado.
   */
   const normalizedBranchResult = branchResult === 'enviado' ? 'enviado' : 'no_enviado';
 
@@ -687,33 +736,46 @@ function buildExecuteResponse(branchResult, values = {}) {
   };
 
   return {
-    ...output,
     outArguments: [
       output
     ]
   };
 }
 
-function sendExecuteJson(res, payload, reason = '') {
+function signExecuteResponsePayload(payload) {
+  if (!JWT_SECRET) {
+    const error = new Error('JWT_SECRET no está configurado. No se puede firmar la respuesta de /execute.');
+    error.code = 'MISSING_JWT_SECRET';
+    throw error;
+  }
+
+  return jwt.sign(payload, JWT_SECRET, {
+    algorithm: 'HS256',
+    noTimestamp: false
+  });
+}
+
+function sendExecuteResponse(res, payload, reason = '') {
   const output = Array.isArray(payload?.outArguments) ? payload.outArguments[0] || {} : {};
-  const responseBody = JSON.stringify(payload);
+  const token = signExecuteResponsePayload(payload);
 
   console.log('[execute-response]', JSON.stringify({
     appVersion: APP_VERSION,
+    responseFormat: 'signed-jwt',
     branchResult: output.branchResult,
     outArgumentsBranchResult: output.branchResult,
     outArgumentsShape: Array.isArray(payload.outArguments) ? `array:${payload.outArguments.length}` : typeof payload.outArguments,
     messageStatus: output.messageStatus,
     errorCode: output.errorCode,
-    reason
+    reason,
+    jwtBytes: Buffer.byteLength(token)
   }));
 
   return res
     .status(200)
-    .set('Content-Type', 'application/json; charset=utf-8')
+    .set('Content-Type', 'application/jwt; charset=utf-8')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-    .set('Content-Length', Buffer.byteLength(responseBody))
-    .send(responseBody);
+    .send(token);
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
@@ -956,7 +1018,7 @@ function createExecuteResponder(res) {
       }
 
       responded = true;
-      return sendExecuteJson(res, payload, reason);
+      return sendExecuteResponse(res, payload, reason);
     }
   };
 }
@@ -1061,7 +1123,7 @@ app.use((error, req, res, next) => {
   }));
 
   if (req.path === '/execute' && !res.headersSent) {
-    return sendExecuteJson(res, providerErrorPayload(
+    return sendExecuteResponse(res, providerErrorPayload(
       Object.assign(new Error(error?.message || 'Error inesperado en /execute.'), {
         code: error?.code || 'UNHANDLED_EXECUTE_ERROR'
       })
