@@ -16,7 +16,7 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const APPLICATION_EXTENSION_KEY = process.env.APPLICATION_EXTENSION_KEY || process.env.SFMC_APPLICATION_EXTENSION_KEY || '';
-const APP_VERSION = '2026-05-13-debug-trace-v14-preserve-outcomes';
+const APP_VERSION = '2026-05-13-restdecision-doc-contract-v15';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -291,15 +291,15 @@ app.get('/debug/version', (req, res) => {
       type: 'RESTDECISION',
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
-      routingContract: 'top-level-branchResult-with-preserved-outcomes',
-      keyFix: 'UI no sobrescribe outcomes.next; preserva las conexiones del canvas',
+      routingContract: 'documented-restdecision-top-level-string-branchResult',
+      keyFix: 'UI no reescribe outcomes; se dejan intactos los vínculos internos del canvas',
       branchResultValues: {
-        sent: true,
-        notSent: false
+        sent: 'sent',
+        notSent: 'notSent'
       },
-      visualTopBranch: 'Enviado / branchResult true',
-      visualBottomBranch: 'No enviado / branchResult false',
-      timeoutBranch: 'No enviado / branchResult false',
+      visualTopBranch: 'Enviado / branchResult sent',
+      visualBottomBranch: 'No enviado / branchResult notSent',
+      timeoutBranch: 'No enviado / branchResult notSent',
       applicationExtensionKeyConfigured: Boolean(APPLICATION_EXTENSION_KEY),
       debug: {
         executeLogs: DEBUG_EXECUTE_LOGS,
@@ -328,6 +328,18 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 function buildConfig() {
+  /*
+    RESTDECISION contract used intentionally:
+
+    - outcomes[].arguments.branchResult are strings.
+    - /execute returns the same string at top level: { "branchResult": "sent" | "notSent" }.
+    - The UI must not rewrite outcomes when the activity is saved. Journey Builder owns
+      the canvas connections for each outcome.
+
+    Visual order:
+    1. Enviado
+    2. No enviado
+  */
   return {
     workflowApiVersion: '1.1',
     type: 'RESTDECISION',
@@ -363,19 +375,8 @@ function buildConfig() {
           { message: '' },
           { campanyaReferencia: '' }
         ],
-        /*
-          RESTDECISION:
-          Journey Builder evalúa los outcomes comparando los outArguments
-          devueltos por /execute contra outcomes[].arguments.
-
-          Para evitar que SFMC trate valores de texto/número como strings no
-          coincidentes y caiga en la primera rama, branchResult se devuelve como
-          booleano:
-          - true  => Enviado
-          - false => No enviado
-        */
         outArguments: [
-          { branchResult: false },
+          { branchResult: '' },
           { messageStatus: '' },
           { providerMessageId: '' },
           { providerOperatorCode: '' },
@@ -430,35 +431,20 @@ function buildConfig() {
       }
     },
     outcomes: [
-      /*
-        Orden visual solicitado:
-        - Rama superior: Enviado
-        - Rama inferior: No enviado
-
-        El enrutado no depende del orden, sino del valor booleano devuelto por /execute:
-        true  => Enviado
-        false => No enviado.
-      */
       {
-        key: 'sent',
-        displayName: 'Enviado',
         arguments: {
-          branchResult: true
+          branchResult: 'sent'
         },
         metaData: {
-          label: 'Enviado',
-          invalid: false
+          label: 'Enviado'
         }
       },
       {
-        key: 'notSent',
-        displayName: 'No enviado',
         arguments: {
-          branchResult: false
+          branchResult: 'notSent'
         },
         metaData: {
-          label: 'No enviado',
-          invalid: false
+          label: 'No enviado'
         }
       }
     ],
@@ -498,7 +484,7 @@ function buildConfig() {
           outArguments: [
             {
               branchResult: {
-                dataType: 'Boolean',
+                dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
               }
@@ -593,14 +579,14 @@ app.get('/debug/config', (req, res) => {
     .send([
       `APP_VERSION=${APP_VERSION}`,
       `activity.type=RESTDECISION`,
-      `routing.outcomeKeys=sent,notSent`,
-      `routing.branchResult.sent=true`,
-      `routing.branchResult.notSent=false`,
+      `routing.outcomeLabels=Enviado,No enviado`,
+      `routing.branchResult.sent=sent`,
+      `routing.branchResult.notSent=notSent`,
       `BASE_URL=${BASE_URL}`,
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
-      `execute.responseFormat=top-level-json branchResult=true|false`,
+      `execute.responseFormat=top-level-json branchResult=sent|notSent`,
       `applicationExtensionKey.configured=${Boolean(APPLICATION_EXTENSION_KEY)}`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
@@ -913,23 +899,18 @@ function branchResultBooleanFromRoutingKey(routingKey) {
 
 function buildExecuteResponse(branchResult, values = {}) {
   /*
-    Contrato de routing para Journey Builder:
+    Routing contract:
+    sent    => Enviado
+    notSent => No enviado
 
-    - type = RESTDECISION.
-    - /execute mantiene useJwt=true para validar la llamada entrante de SFMC.
-    - La respuesta es JSON plano HTTP 200.
-    - Journey Builder enruta comparando branchResult con outcomes[].arguments.
-    - branchResult DEBE ser booleano:
-      true  => Enviado
-      false => No enviado
-
-    Timeout BITMessage => branchResult false.
+    No boolean, no numeric values. Journey Builder compares this string against
+    outcomes[].arguments.branchResult.
   */
   const routingKey = normalizeRoutingKey(branchResult);
-  const branchResultBoolean = branchResultBooleanFromRoutingKey(routingKey);
+  const branchResultValue = routingKey === 'sent' ? 'sent' : 'notSent';
 
   return {
-    branchResult: branchResultBoolean,
+    branchResult: branchResultValue,
     messageStatus: values.messageStatus || (routingKey === 'sent' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
     providerOperatorCode: values.providerOperatorCode || '',
@@ -950,7 +931,7 @@ function sendExecuteResponse(res, payload, reason = '') {
 
   const debugSummary = {
     appVersion: APP_VERSION,
-    responseFormat: 'top-level-json-restdecision-boolean',
+    responseFormat: 'top-level-json-restdecision-string-doc-contract',
     httpStatusReturnedToSfmc: 200,
     contentTypeReturnedToSfmc: 'application/json',
     branchResult: responsePayload.branchResult,
@@ -1461,7 +1442,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'jwt-error',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1471,7 +1452,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-jwt-error',
       routingDecision: {
         reason: 'jwt-error',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1515,7 +1496,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-to',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1525,7 +1506,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-to',
       routingDecision: {
         reason: 'missing-to',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1549,7 +1530,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-message',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1559,7 +1540,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-message',
       routingDecision: {
         reason: 'missing-message',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,
@@ -1582,7 +1563,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       requestId,
       reason: 'missing-campanya-referencia',
       decision: 'No enviado',
-      branchResult: false,
+      branchResult: 'notSent',
       errorCode: error.code,
       errorMessage: error.message,
       elapsedMs: Date.now() - executeStart
@@ -1592,7 +1573,7 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       state: 'responded-missing-campaign',
       routingDecision: {
         reason: 'missing-campanya-referencia',
-        branchResult: false,
+        branchResult: 'notSent',
         decision: 'No enviado',
         errorCode: error.code,
         errorMessage: error.message,

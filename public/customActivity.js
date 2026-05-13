@@ -251,13 +251,11 @@
 
 
   function applyExecutionContract() {
-    const origin = window.location.origin;
-
     activityPayload.arguments = activityPayload.arguments || {};
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
-
+    activityPayload.arguments.execute.inArguments = activityPayload.arguments.execute.inArguments || [];
     activityPayload.arguments.execute.outArguments = [
-      { branchResult: false },
+      { branchResult: '' },
       { messageStatus: '' },
       { providerMessageId: '' },
       { providerOperatorCode: '' },
@@ -270,76 +268,18 @@
       { debugRequestId: '' }
     ];
 
-    activityPayload.arguments.execute.url = activityPayload.arguments.execute.url || `${origin}/execute`;
-    activityPayload.arguments.execute.verb = 'POST';
-    activityPayload.arguments.execute.body = '';
-    activityPayload.arguments.execute.header = '';
-    activityPayload.arguments.execute.format = 'json';
-
-    // /execute debe estar firmado por SFMC. La respuesta a SFMC es JSON plano.
-    // RESTDECISION enruta comparando branchResult con outcomes[].arguments.branchResult.
-    activityPayload.arguments.execute.useJwt = true;
-
-    activityPayload.arguments.execute.timeout = activityPayload.arguments.execute.timeout || 60000;
-    activityPayload.arguments.execute.retryCount = activityPayload.arguments.execute.retryCount || 0;
-    activityPayload.arguments.execute.retryDelay = activityPayload.arguments.execute.retryDelay || 5000;
-
-    activityPayload.type = 'RESTDECISION';
-
     /*
-      IMPORTANTE:
-      No debemos machacar los outcomes que ya trae Journey Builder porque contienen
-      datos internos del canvas, especialmente `next`, que enlaza cada rama con la
-      siguiente actividad. Si se reemplazan por objetos nuevos, SFMC puede aceptar el
-      200 del execute pero caer por la primera rama visual.
+      IMPORTANT:
+      Do not rewrite activityPayload.outcomes here.
 
-      Aquí solo corregimos key/label/arguments y preservamos cualquier propiedad
-      existente del canvas: next, metaData interna, id, etc.
+      Journey Builder injects canvas wiring into outcomes when the user connects
+      the branches. Replacing outcomes from the UI can make JB keep routing to the
+      default/first path even when /execute returns branchResult=notSent.
+
+      The canonical outcomes live in /config.json:
+        branchResult=sent    -> Enviado
+        branchResult=notSent -> No enviado
     */
-    const existingOutcomes = Array.isArray(activityPayload.outcomes) ? activityPayload.outcomes : [];
-
-    const desiredOutcomes = [
-      {
-        key: 'sent',
-        displayName: 'Enviado',
-        arguments: {
-          branchResult: true
-        },
-        metaData: {
-          label: 'Enviado',
-          invalid: false
-        }
-      },
-      {
-        key: 'notSent',
-        displayName: 'No enviado',
-        arguments: {
-          branchResult: false
-        },
-        metaData: {
-          label: 'No enviado',
-          invalid: false
-        }
-      }
-    ];
-
-    activityPayload.outcomes = desiredOutcomes.map((desired, index) => {
-      const existing =
-        existingOutcomes.find((item) => item && item.key === desired.key) ||
-        existingOutcomes[index] ||
-        {};
-
-      return {
-        ...existing,
-        key: desired.key,
-        displayName: desired.displayName,
-        arguments: desired.arguments,
-        metaData: {
-          ...(existing.metaData || {}),
-          ...desired.metaData
-        }
-      };
-    });
   }
 
 
