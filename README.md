@@ -2,91 +2,70 @@
 
 Custom Activity / Custom Split para Salesforce Marketing Cloud Journey Builder que envía SMS mediante BITMessage y enruta al contacto según el resultado real del envío.
 
-## Punto clave de esta versión
-
-Esta versión usa:
-
-```json
-"type": "RESTDECISION"
-```
-
-No usa `type: "REST"` para el routing, porque en Journey Builder una REST activity estándar puede responder `200` correctamente y aun así caer en el primer branch visual. Para enrutar dinámicamente se usa el contrato de decisión:
-
-```json
-{
-  "outcome": "notSent",
-  "branchResult": "notSent"
-}
-```
-
-o:
-
-```json
-{
-  "outcome": "sent",
-  "branchResult": "sent"
-}
-```
-
-Los labels visibles en Journey Builder son:
-
-- `No enviado`
-- `Enviado`
-
-El primer outcome es `No enviado` de forma intencionada. Si Journey Builder no pudiera resolver el outcome por caché o configuración antigua, el fallback no debe ser `Enviado`.
-
-## Reglas de routing
+## Versión
 
 ```text
-BITMessage estado ENVIADO      -> Enviado
-BITMessage estado CONFIRMADO   -> Enviado
-BITMessage estado ERROR        -> No enviado
-Timeout BITMessage             -> No enviado
-HTTP error BITMessage          -> No enviado
-Teléfono vacío/inválido        -> No enviado
-Campaña vacía                  -> No enviado
-Error interno controlado       -> No enviado
+2026-05-13-debug-trace-v11
 ```
 
-## Success en Journey Builder
+Esta versión está preparada para debuggear el problema de routing en Journey Builder. Registra en los logs de Render:
 
-`Success` significa que `/execute` respondió HTTP 200 a SFMC. No significa necesariamente que el SMS se haya enviado.
+- argumentos recibidos desde SFMC,
+- teléfono raw y teléfono normalizado,
+- campaña,
+- mensaje,
+- request enviado a BITMessage,
+- respuesta/error/timeout de BITMessage,
+- decisión calculada,
+- JSON exacto devuelto a SFMC.
 
-La rama correcta se decide por:
+## Contrato actual
 
 ```json
 {
-  "outcome": "sent"
+  "type": "RESTDECISION"
 }
 ```
 
-o:
-
-```json
-{
-  "outcome": "notSent"
-}
-```
-
-`branchResult` se conserva como outArgument para trazabilidad.
-
-## Endpoint BITMessage
+Ramas visuales:
 
 ```text
-https://bitmessage.fundaciobit.org/bitmessage/api/v1/envios/mensaje/send
+Rama superior: Enviado
+Rama inferior: No enviado
 ```
 
-La actividad llama por `POST` con JSON:
+Respuesta esperada para envío correcto:
 
 ```json
 {
-  "telefono": "34654162543",
-  "texto": "Mensaje de prueba",
-  "campanyaReferencia": "SOIB"
+  "branchResult": true,
+  "messageStatus": "ENVIADO"
 }
 ```
 
-## Variables de entorno en Render
+Respuesta esperada para timeout/error:
+
+```json
+{
+  "branchResult": false,
+  "messageStatus": "ERROR",
+  "errorCode": "TIMEOUT"
+}
+```
+
+## Reglas
+
+```text
+BITMessage ENVIADO / CONFIRMADO -> Enviado
+BITMessage ERROR                -> No enviado
+Timeout BITMessage              -> No enviado
+HTTP error BITMessage           -> No enviado
+Teléfono vacío/inválido         -> No enviado
+Campaña vacía                   -> No enviado
+JWT inválido                    -> No enviado, sin enviar SMS
+```
+
+## Variables Render recomendadas para debug
 
 ```env
 BASE_URL=https://TU-SERVICIO.onrender.com
@@ -102,9 +81,86 @@ BITMESSAGE_API_TIMEOUT_MS=3000
 SFMC_EXECUTE_TIMEOUT_MS=60000
 SFMC_EXECUTE_RETRY_COUNT=0
 SFMC_EXECUTE_RETRY_DELAY_MS=5000
+
+DEBUG_EXECUTE_LOGS=true
+DEBUG_LOG_FULL_MESSAGE=true
+DEBUG_LOG_FULL_PROVIDER_RESPONSE=true
+DEBUG_LOG_FULL_SFMC_PAYLOAD=false
+DEBUG_ACCESS_TOKEN=pon_un_token_largo_para_consultar_debug
+DEBUG_FORCE_BITMESSAGE_RESULT=
+DEBUG_MAX_EXECUTIONS=50
 ```
 
-## URLs de diagnóstico
+## Prueba controlada sin llamar a BITMessage
+
+Para aislar si el fallo está en el contrato de respuesta hacia Journey Builder, puedes simular el resultado desde Render.
+
+### Simular timeout
+
+```env
+DEBUG_FORCE_BITMESSAGE_RESULT=timeout
+```
+
+Debe devolver a SFMC:
+
+```json
+{
+  "branchResult": false,
+  "messageStatus": "ERROR",
+  "errorCode": "TIMEOUT"
+}
+```
+
+La Journey debe ir por `No enviado`.
+
+### Simular enviado
+
+```env
+DEBUG_FORCE_BITMESSAGE_RESULT=sent
+```
+
+Debe devolver a SFMC:
+
+```json
+{
+  "branchResult": true,
+  "messageStatus": "ENVIADO"
+}
+```
+
+La Journey debe ir por `Enviado`.
+
+Después de la prueba deja:
+
+```env
+DEBUG_FORCE_BITMESSAGE_RESULT=
+```
+
+## Logs clave en Render
+
+Busca estos eventos:
+
+```text
+[debug:execute-start]
+[debug:sfmc-payload-decoded]
+[debug:execute-arguments]
+[debug:bitmessage-request]
+[debug:bitmessage-response]
+[debug:bitmessage-timeout]
+[debug:execute-decision]
+[debug:sfmc-response]
+[execute-response]
+```
+
+El evento más importante es:
+
+```text
+[execute-response]
+```
+
+Ahí se ve el HTTP 200 exacto y el body enviado a SFMC.
+
+## Endpoints de diagnóstico
 
 ```text
 /health
@@ -116,52 +172,29 @@ SFMC_EXECUTE_RETRY_DELAY_MS=5000
 /index.html
 ```
 
-## Instalación en SFMC
+También puedes consultar las últimas ejecuciones en memoria:
+
+```text
+/debug/executions?token=TU_DEBUG_ACCESS_TOKEN
+/debug/executions/REQUEST_ID?token=TU_DEBUG_ACCESS_TOKEN
+```
+
+Estos endpoints requieren `DEBUG_ACCESS_TOKEN`.
+
+## SFMC
 
 Usa como endpoint del componente Journey Builder Activity:
 
 ```text
-https://TU-SERVICIO.onrender.com/config.json?v=7
+https://TU-SERVICIO.onrender.com/config.json?v=11
 ```
 
-Si ya tenías una versión anterior con `type: REST`, lo recomendable es crear un componente nuevo o cambiar la URL con `?v=7`, guardar, crear una nueva versión de la Journey, eliminar la actividad anterior del canvas y arrastrarla de nuevo.
+Después de cambiarlo:
 
+1. Guarda el Installed Package.
+2. Crea una nueva versión de la Journey.
+3. Elimina la actividad anterior del canvas.
+4. Arrastra la actividad de nuevo.
+5. Configura teléfono, campaña y mensaje.
+6. Publica/prueba.
 
-## Orden visual de ramas
-
-Esta versión usa `RESTDECISION` con este orden visual en Journey Builder:
-
-1. Enviado
-2. No enviado
-
-El enrutado real no depende de la posición visual. `/execute` devuelve:
-
-- `outcome: "sent"` y `branchResult: "sent"` cuando BITMessage devuelve `ENVIADO` o `CONFIRMADO`.
-- `outcome: "notSent"` y `branchResult: "notSent"` ante timeout, error de BITMessage, teléfono inválido, campaña vacía o cualquier error controlado.
-
-
-## v9 - Routing numérico para RESTDECISION
-
-Esta versión evita que Journey Builder enrute por defecto por la primera rama cuando el proveedor falla.
-
-Contrato de salida de `/execute`:
-
-- Enviado: `branchResult = "0"` y `outcome = "sent"`
-- No enviado: `branchResult = "1"` y `outcome = "notSent"`
-
-El orden visual se mantiene:
-
-1. Rama superior: Enviado
-2. Rama inferior: No enviado
-
-Timeout de BITMessage, errores HTTP, errores funcionales, teléfono inválido o campaña vacía devuelven HTTP 200 con `branchResult = "1"`.
-
-
-## v10 - Routing RESTDECISION booleano
-
-Esta versión enruta con `branchResult` booleano a nivel raíz de la respuesta `/execute`:
-
-- `branchResult: true` -> Enviado
-- `branchResult: false` -> No enviado
-
-Timeouts, errores de BITMessage, teléfonos inválidos y errores funcionales devuelven HTTP 200 con `branchResult: false` para que Journey Builder no pierda el contacto y lo mande por la rama inferior No enviado.

@@ -3,6 +3,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import path from 'node:path';
 import fs from 'node:fs';
+import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
@@ -14,7 +15,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const APP_VERSION = '2026-05-13-restdecision-boolean-branch-v10';
+const APP_VERSION = '2026-05-13-debug-trace-v11';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -100,6 +101,140 @@ const BITMESSAGE_API_KEY = process.env.BITMESSAGE_API_KEY || process.env.EXTERNA
 const BITMESSAGE_AUTH_HEADER_NAME = process.env.BITMESSAGE_AUTH_HEADER_NAME || '';
 const BITMESSAGE_AUTH_HEADER_VALUE = process.env.BITMESSAGE_AUTH_HEADER_VALUE || '';
 
+// =========================
+// Debug / observabilidad
+// =========================
+//
+// Estas opciones están pensadas para diagnosticar el enrutado real en Journey Builder.
+// No se registran credenciales ni headers de Authorization.
+const DEBUG_EXECUTE_LOGS = String(process.env.DEBUG_EXECUTE_LOGS || 'true').toLowerCase() !== 'false';
+const DEBUG_LOG_FULL_MESSAGE = String(process.env.DEBUG_LOG_FULL_MESSAGE || 'true').toLowerCase() === 'true';
+const DEBUG_LOG_FULL_PROVIDER_RESPONSE = String(process.env.DEBUG_LOG_FULL_PROVIDER_RESPONSE || 'true').toLowerCase() === 'true';
+const DEBUG_LOG_FULL_SFMC_PAYLOAD = String(process.env.DEBUG_LOG_FULL_SFMC_PAYLOAD || 'false').toLowerCase() === 'true';
+const DEBUG_ACCESS_TOKEN = process.env.DEBUG_ACCESS_TOKEN || '';
+const DEBUG_MAX_EXECUTIONS = Math.max(1, Math.floor(numberFromEnv(process.env.DEBUG_MAX_EXECUTIONS, 50)));
+const DEBUG_FORCE_BITMESSAGE_RESULT = String(process.env.DEBUG_FORCE_BITMESSAGE_RESULT || '').trim().toLowerCase();
+// Valores soportados para DEBUG_FORCE_BITMESSAGE_RESULT: '', timeout, error, sent
+const executionDebugStore = [];
+
+function stableStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sha256Short(value) {
+  return createHash('sha256').update(String(value || '')).digest('hex').slice(0, 12);
+}
+
+function safeLogMessage(message) {
+  const text = String(message || '');
+  if (DEBUG_LOG_FULL_MESSAGE) {
+    return text;
+  }
+
+  return {
+    preview: truncate(text, 80),
+    length: text.length,
+    sha256: sha256Short(text)
+  };
+}
+
+function safeProviderResponse(responseText) {
+  const text = String(responseText || '');
+  if (DEBUG_LOG_FULL_PROVIDER_RESPONSE) {
+    return truncate(text, 3900);
+  }
+
+  return {
+    preview: truncate(text, 250),
+    length: text.length,
+    sha256: sha256Short(text)
+  };
+}
+
+function safeSfmcPayload(payload) {
+  if (DEBUG_LOG_FULL_SFMC_PAYLOAD) {
+    return payload;
+  }
+
+  const args = mergeInArguments(payload?.inArguments || payload?.arguments?.execute?.inArguments || []);
+  return {
+    keys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+    hasInArguments: Boolean(payload?.inArguments || payload?.arguments?.execute?.inArguments),
+    inArguments: {
+      contactKey: args.contactKey || '',
+      to: args.to || '',
+      campanyaReferencia: args.campanyaReferencia || '',
+      message: safeLogMessage(args.message)
+    }
+  };
+}
+
+function debugLog(eventName, data = {}) {
+  if (!DEBUG_EXECUTE_LOGS) return;
+
+  const logPayload = {
+    ts: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    event: eventName,
+    ...data
+  };
+
+  console.log(`[debug:${eventName}] ${stableStringify(logPayload)}`);
+}
+
+function saveExecutionTrace(trace) {
+  executionDebugStore.unshift({
+    ...trace,
+    updatedAt: new Date().toISOString()
+  });
+
+  while (executionDebugStore.length > DEBUG_MAX_EXECUTIONS) {
+    executionDebugStore.pop();
+  }
+}
+
+function updateExecutionTrace(requestId, patch) {
+  const existing = executionDebugStore.find((item) => item.requestId === requestId);
+  if (!existing) {
+    saveExecutionTrace({
+      requestId,
+      ...patch
+    });
+    return;
+  }
+
+  Object.assign(existing, patch, {
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function assertDebugAccess(req, res) {
+  if (!DEBUG_ACCESS_TOKEN) {
+    res.status(403).json({
+      success: false,
+      error: 'DEBUG_ACCESS_TOKEN_NOT_CONFIGURED',
+      message: 'Configura DEBUG_ACCESS_TOKEN en Render para consultar este endpoint.'
+    });
+    return false;
+  }
+
+  const providedToken = req.get('x-debug-token') || req.query.token || '';
+  if (providedToken !== DEBUG_ACCESS_TOKEN) {
+    res.status(401).json({
+      success: false,
+      error: 'UNAUTHORIZED_DEBUG_ACCESS'
+    });
+    return false;
+  }
+
+  return true;
+}
+
+
 app.disable('x-powered-by');
 
 // Servimos Postmonger desde el mismo dominio para evitar bloqueos de CDNs externos dentro del iframe de Journey Builder.
@@ -155,7 +290,7 @@ app.get('/debug/version', (req, res) => {
       type: 'RESTDECISION',
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
-      routingContract: 'top-level-boolean-branchResult-match-outcomes-arguments',
+      routingContract: 'debug-trace-top-level-branchResult',
       branchResultValues: {
         sent: true,
         notSent: false
@@ -163,6 +298,15 @@ app.get('/debug/version', (req, res) => {
       visualTopBranch: 'Enviado / branchResult true',
       visualBottomBranch: 'No enviado / branchResult false',
       timeoutBranch: 'No enviado / branchResult false',
+      debug: {
+        executeLogs: DEBUG_EXECUTE_LOGS,
+        logFullMessage: DEBUG_LOG_FULL_MESSAGE,
+        logFullProviderResponse: DEBUG_LOG_FULL_PROVIDER_RESPONSE,
+        logFullSfmcPayload: DEBUG_LOG_FULL_SFMC_PAYLOAD,
+        hasDebugAccessToken: Boolean(DEBUG_ACCESS_TOKEN),
+        maxExecutionsStored: DEBUG_MAX_EXECUTIONS,
+        forceBitmessageResult: DEBUG_FORCE_BITMESSAGE_RESULT || ''
+      },
       timestamp: new Date().toISOString()
     });
 });
@@ -237,7 +381,8 @@ function buildConfig() {
           { providerResponse: '' },
           { phoneSent: '' },
           { campaignReference: '' },
-          { sentAt: '' }
+          { sentAt: '' },
+          { debugRequestId: '' }
         ],
         url: `${BASE_URL}/execute`,
         verb: 'POST',
@@ -416,6 +561,13 @@ function buildConfig() {
                 direction: 'out',
                 access: 'visible'
               }
+            },
+            {
+              debugRequestId: {
+                dataType: 'Text',
+                direction: 'out',
+                access: 'visible'
+              }
             }
           ]
         }
@@ -460,8 +612,49 @@ app.get('/debug/config', (req, res) => {
       `bitmessage.hasCustomHeaderValue=${Boolean(BITMESSAGE_AUTH_HEADER_VALUE)}`,
       `bitmessage.hasDefaultCampanyaReferencia=${Boolean(BITMESSAGE_CAMPANYA_REFERENCIA)}`,
       `has.JWT_SECRET=${Boolean(JWT_SECRET)}`,
+      `DEBUG_EXECUTE_LOGS=${DEBUG_EXECUTE_LOGS}`,
+      `DEBUG_LOG_FULL_MESSAGE=${DEBUG_LOG_FULL_MESSAGE}`,
+      `DEBUG_LOG_FULL_PROVIDER_RESPONSE=${DEBUG_LOG_FULL_PROVIDER_RESPONSE}`,
+      `DEBUG_LOG_FULL_SFMC_PAYLOAD=${DEBUG_LOG_FULL_SFMC_PAYLOAD}`,
+      `DEBUG_FORCE_BITMESSAGE_RESULT=${DEBUG_FORCE_BITMESSAGE_RESULT || ''}`,
+      `DEBUG_ACCESS_TOKEN.configured=${Boolean(DEBUG_ACCESS_TOKEN)}`,
       `NODE_ENV=${process.env.NODE_ENV || ''}`
     ].join('\n'));
+});
+
+
+app.get('/debug/executions', (req, res) => {
+  if (!assertDebugAccess(req, res)) return;
+
+  res
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .json({
+      success: true,
+      count: executionDebugStore.length,
+      executions: executionDebugStore
+    });
+});
+
+app.get('/debug/executions/:requestId', (req, res) => {
+  if (!assertDebugAccess(req, res)) return;
+
+  const execution = executionDebugStore.find((item) => item.requestId === req.params.requestId);
+  if (!execution) {
+    return res.status(404).json({
+      success: false,
+      error: 'EXECUTION_NOT_FOUND',
+      requestId: req.params.requestId
+    });
+  }
+
+  return res
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .json({
+      success: true,
+      execution
+    });
 });
 
 app.get('/debug/sample-execute-response', (req, res) => {
@@ -740,25 +933,43 @@ function buildExecuteResponse(branchResult, values = {}) {
     providerResponse: values.providerResponse || '',
     phoneSent: values.phoneSent || '',
     campaignReference: values.campaignReference || '',
-    sentAt: values.sentAt || new Date().toISOString()
+    sentAt: values.sentAt || new Date().toISOString(),
+    debugRequestId: values.debugRequestId || ''
   };
 }
 
 function sendExecuteResponse(res, payload, reason = '') {
-  console.log('[execute-response]', JSON.stringify({
+  const responsePayload = {
+    ...payload
+  };
+
+  const debugSummary = {
     appVersion: APP_VERSION,
     responseFormat: 'top-level-json-restdecision-boolean',
-    branchResult: payload.branchResult,
-    messageStatus: payload.messageStatus,
-    errorCode: payload.errorCode,
-    reason
-  }));
+    httpStatusReturnedToSfmc: 200,
+    contentTypeReturnedToSfmc: 'application/json',
+    branchResult: responsePayload.branchResult,
+    messageStatus: responsePayload.messageStatus,
+    errorCode: responsePayload.errorCode,
+    reason,
+    sfmcResponsePayload: responsePayload
+  };
+
+  console.log('[execute-response]', JSON.stringify(debugSummary));
+  debugLog('sfmc-response', debugSummary);
+
+  if (responsePayload.debugRequestId) {
+    updateExecutionTrace(responsePayload.debugRequestId, {
+      sfmcResponse: debugSummary,
+      completedAt: new Date().toISOString()
+    });
+  }
 
   return res
     .status(200)
     .type('application/json')
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-    .json(payload);
+    .json(responsePayload);
 }
 
 function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
@@ -771,11 +982,12 @@ function providerErrorPayload(error, fallbackCode = 'BITMESSAGE_ERROR') {
     providerResponse: truncate(error.providerResponse || ''),
     phoneSent: error.phoneSent || '',
     campaignReference: error.campaignReference || '',
-    sentAt: new Date().toISOString()
+    sentAt: new Date().toISOString(),
+    debugRequestId: error.debugRequestId || ''
   });
 }
 
-async function sendBitmessage({ to, message, campanyaReferencia }) {
+async function sendBitmessage({ to, message, campanyaReferencia, debugRequestId }) {
   if (!BITMESSAGE_API_URL) {
     const error = new Error('BITMESSAGE_API_URL no está configurado.');
     error.code = 'CONFIG_ERROR';
@@ -822,6 +1034,102 @@ async function sendBitmessage({ to, message, campanyaReferencia }) {
     campanyaReferencia: campaignReference
   };
 
+  const providerRequestDebug = {
+    requestId: debugRequestId,
+    method: 'POST',
+    url: BITMESSAGE_API_URL,
+    timeoutMs: BITMESSAGE_API_TIMEOUT_MS,
+    authType: BITMESSAGE_AUTH_TYPE,
+    hasAuthorizationHeader: BITMESSAGE_AUTH_TYPE !== 'none',
+    body: {
+      telefono,
+      texto: safeLogMessage(texto),
+      textoLength: texto.length,
+      campanyaReferencia: campaignReference
+    }
+  };
+
+  debugLog('bitmessage-request', providerRequestDebug);
+  if (debugRequestId) {
+    updateExecutionTrace(debugRequestId, {
+      bitmessageRequest: providerRequestDebug
+    });
+  }
+
+  if (DEBUG_FORCE_BITMESSAGE_RESULT) {
+    debugLog('bitmessage-forced-result', {
+      requestId: debugRequestId,
+      forcedResult: DEBUG_FORCE_BITMESSAGE_RESULT
+    });
+
+    if (DEBUG_FORCE_BITMESSAGE_RESULT === 'timeout') {
+      const timeoutError = new Error(`Timeout simulado llamando a BITMessage después de ${BITMESSAGE_API_TIMEOUT_MS} ms.`);
+      timeoutError.code = 'TIMEOUT';
+      timeoutError.phoneSent = telefono;
+      timeoutError.campaignReference = campaignReference;
+      throw timeoutError;
+    }
+
+    if (DEBUG_FORCE_BITMESSAGE_RESULT === 'error') {
+      const responseBody = {
+        telefono,
+        texto,
+        estado: 'ERROR',
+        infoError: 'DEBUG_FORCED_ERROR',
+        campanyaReferencia: campaignReference
+      };
+      const responseText = JSON.stringify(responseBody);
+      const forcedError = new Error('Error simulado de BITMessage.');
+      forcedError.code = 'DEBUG_FORCED_ERROR';
+      forcedError.providerStatus = 'ERROR';
+      forcedError.providerResponse = responseText;
+      forcedError.phoneSent = telefono;
+      forcedError.campaignReference = campaignReference;
+      debugLog('bitmessage-response', {
+        requestId: debugRequestId,
+        forced: true,
+        httpStatus: 200,
+        ok: true,
+        estado: 'ERROR',
+        infoError: 'DEBUG_FORCED_ERROR',
+        responseBody
+      });
+      throw forcedError;
+    }
+
+    if (DEBUG_FORCE_BITMESSAGE_RESULT === 'sent') {
+      const responseBody = {
+        id: 'debug-sent-id',
+        codigoExternoOperadora: 'debug-operator-code',
+        fechaEnvio: new Date().toISOString(),
+        telefono,
+        texto,
+        estado: 'ENVIADO',
+        campanyaReferencia: campaignReference
+      };
+      const responseText = JSON.stringify(responseBody);
+      debugLog('bitmessage-response', {
+        requestId: debugRequestId,
+        forced: true,
+        httpStatus: 200,
+        ok: true,
+        estado: 'ENVIADO',
+        responseBody
+      });
+      return {
+        providerMessageId: 'debug-sent-id',
+        providerOperatorCode: 'debug-operator-code',
+        providerStatus: 'ENVIADO',
+        providerResponse: responseText,
+        phoneSent: telefono,
+        campaignReference,
+        sentAt: responseBody.fechaEnvio
+      };
+    }
+  }
+
+  const providerStart = Date.now();
+
   try {
     const response = await fetch(BITMESSAGE_API_URL, {
       method: 'POST',
@@ -841,6 +1149,26 @@ async function sendBitmessage({ to, message, campanyaReferencia }) {
       responseBody = responseText ? JSON.parse(responseText) : {};
     } catch {
       responseBody = { raw: responseText };
+    }
+
+    const providerElapsedMs = Date.now() - providerStart;
+    const estadoDebug = String(responseBody.estado || '').toUpperCase();
+    const providerResponseDebug = {
+      requestId: debugRequestId,
+      httpStatus: response.status,
+      ok: response.ok,
+      elapsedMs: providerElapsedMs,
+      estado: estadoDebug || '',
+      infoError: responseBody.infoError || '',
+      responseBody,
+      responseText: safeProviderResponse(responseText)
+    };
+
+    debugLog('bitmessage-response', providerResponseDebug);
+    if (debugRequestId) {
+      updateExecutionTrace(debugRequestId, {
+        bitmessageResponse: providerResponseDebug
+      });
     }
 
     if (!response.ok) {
@@ -911,7 +1239,39 @@ async function sendBitmessage({ to, message, campanyaReferencia }) {
       timeoutError.code = 'TIMEOUT';
       timeoutError.phoneSent = telefono;
       timeoutError.campaignReference = campaignReference;
+
+      const timeoutDebug = {
+        requestId: debugRequestId,
+        timeoutMs: BITMESSAGE_API_TIMEOUT_MS,
+        elapsedMs: Date.now() - providerStart,
+        errorCode: timeoutError.code,
+        errorMessage: timeoutError.message
+      };
+
+      debugLog('bitmessage-timeout', timeoutDebug);
+      if (debugRequestId) {
+        updateExecutionTrace(debugRequestId, {
+          bitmessageError: timeoutDebug
+        });
+      }
+
       throw timeoutError;
+    }
+
+    const errorDebug = {
+      requestId: debugRequestId,
+      elapsedMs: Date.now() - providerStart,
+      errorCode: error.code || error.name || 'BITMESSAGE_ERROR',
+      errorName: error.name || '',
+      errorMessage: error.message || '',
+      providerResponse: safeProviderResponse(error.providerResponse || '')
+    };
+
+    debugLog('bitmessage-error', errorDebug);
+    if (debugRequestId) {
+      updateExecutionTrace(debugRequestId, {
+        bitmessageError: errorDebug
+      });
     }
 
     throw error;
@@ -1007,21 +1367,62 @@ function createExecuteResponder(res) {
 }
 
 app.post('/execute', rawBodyParser, async (req, res) => {
+  const executeStart = Date.now();
+  const requestId = String(req.get('x-request-id') || randomUUID());
   const executeResponder = createExecuteResponder(res);
+
+  saveExecutionTrace({
+    requestId,
+    startedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    path: '/execute',
+    httpRequest: {
+      method: req.method,
+      contentType: req.get('content-type') || '',
+      contentLength: req.get('content-length') || '',
+      userAgent: req.get('user-agent') || '',
+      sfmcRequestId: req.get('x-request-id') || ''
+    },
+    state: 'started'
+  });
+
+  debugLog('execute-start', {
+    requestId,
+    contentType: req.get('content-type') || '',
+    contentLength: req.get('content-length') || '',
+    executeTimeoutMs: SFMC_EXECUTE_TIMEOUT_MS,
+    bitmessageTimeoutMs: BITMESSAGE_API_TIMEOUT_MS,
+    forceBitmessageResult: DEBUG_FORCE_BITMESSAGE_RESULT || ''
+  });
 
   /*
     Último cinturón de seguridad:
     Si por cualquier motivo el proceso tarda demasiado, respondemos antes a SFMC
-    con No enviado. Así evitamos perder al contacto por Hard Error.
+    con No enviado. Así evitamos perder al contacto por Hard Error cuando Render
+    sí recibió la llamada.
   */
   const safetyTimeoutMs = Math.max(1000, Math.min(SFMC_EXECUTE_TIMEOUT_MS - 5000, BITMESSAGE_API_TIMEOUT_MS + 2000));
   const safetyTimer = setTimeout(() => {
-    executeResponder.send(buildExecuteResponse('notSent', {
+    const safetyPayload = buildExecuteResponse('notSent', {
       messageStatus: 'ERROR',
       errorCode: 'EXECUTE_SAFETY_TIMEOUT',
       errorMessage: `La Custom Activity agotó el tiempo seguro de ejecución (${safetyTimeoutMs} ms) y enruta a No enviado.`,
-      sentAt: new Date().toISOString()
-    }), 'execute-safety-timeout');
+      sentAt: new Date().toISOString(),
+      debugRequestId: requestId
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-safety-timeout',
+      routingDecision: {
+        reason: 'execute-safety-timeout',
+        branchResult: safetyPayload.branchResult,
+        messageStatus: safetyPayload.messageStatus,
+        errorCode: safetyPayload.errorCode,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    executeResponder.send(safetyPayload, 'execute-safety-timeout');
   }, safetyTimeoutMs);
 
   let payload;
@@ -1036,49 +1437,177 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       allowUnsignedJson: false,
       allowInvalidJwt: false
     });
+
+    debugLog('sfmc-payload-decoded', {
+      requestId,
+      payload: safeSfmcPayload(payload)
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'sfmc-payload-decoded',
+      sfmcPayload: safeSfmcPayload(payload)
+    });
   } catch (error) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(
-      Object.assign(error, { code: 'JWT_ERROR' }),
-      'JWT_ERROR'
-    ), 'jwt-error');
+    error.code = 'JWT_ERROR';
+    error.debugRequestId = requestId;
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: 'jwt-error',
+      decision: 'No enviado',
+      branchResult: false,
+      errorCode: error.code,
+      errorMessage: error.message,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-jwt-error',
+      routingDecision: {
+        reason: 'jwt-error',
+        branchResult: false,
+        decision: 'No enviado',
+        errorCode: error.code,
+        errorMessage: error.message,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(providerErrorPayload(error, 'JWT_ERROR'), 'jwt-error');
   }
 
   const args = mergeInArguments(payload.inArguments || payload?.arguments?.execute?.inArguments || []);
   const to = String(args.to || '').trim();
   const message = String(args.message || '').trim();
   const campanyaReferencia = String(args.campanyaReferencia || BITMESSAGE_CAMPANYA_REFERENCIA || '').trim();
+  const normalizedTelefono = normalizeTelefono(to);
+
+  const extractedArgumentsDebug = {
+    requestId,
+    contactKey: args.contactKey || '',
+    telefonoRaw: to,
+    telefonoNormalizado: normalizedTelefono,
+    campanyaReferencia,
+    mensaje: safeLogMessage(message),
+    mensajeLength: message.length
+  };
+
+  debugLog('execute-arguments', extractedArgumentsDebug);
+  updateExecutionTrace(requestId, {
+    state: 'arguments-extracted',
+    executeArguments: extractedArgumentsDebug
+  });
 
   if (!to) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(
-      Object.assign(new Error('El campo destino/teléfono llegó vacío.'), { code: 'MISSING_TO' })
-    ), 'missing-to');
+    const error = Object.assign(new Error('El campo destino/teléfono llegó vacío.'), {
+      code: 'MISSING_TO',
+      debugRequestId: requestId
+    });
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: 'missing-to',
+      decision: 'No enviado',
+      branchResult: false,
+      errorCode: error.code,
+      errorMessage: error.message,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-missing-to',
+      routingDecision: {
+        reason: 'missing-to',
+        branchResult: false,
+        decision: 'No enviado',
+        errorCode: error.code,
+        errorMessage: error.message,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(providerErrorPayload(error), 'missing-to');
   }
 
   if (!message) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(
-      Object.assign(new Error('El mensaje llegó vacío.'), { code: 'MISSING_MESSAGE' })
-    ), 'missing-message');
+    const error = Object.assign(new Error('El mensaje llegó vacío.'), {
+      code: 'MISSING_MESSAGE',
+      phoneSent: normalizedTelefono,
+      campaignReference: campanyaReferencia,
+      debugRequestId: requestId
+    });
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: 'missing-message',
+      decision: 'No enviado',
+      branchResult: false,
+      errorCode: error.code,
+      errorMessage: error.message,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-missing-message',
+      routingDecision: {
+        reason: 'missing-message',
+        branchResult: false,
+        decision: 'No enviado',
+        errorCode: error.code,
+        errorMessage: error.message,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(providerErrorPayload(error), 'missing-message');
   }
 
   if (!campanyaReferencia) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(
-      Object.assign(new Error('La referencia de campaña de BITMessage llegó vacía.'), { code: 'MISSING_CAMPANYA_REFERENCIA' })
-    ), 'missing-campanya-referencia');
+    const error = Object.assign(new Error('La referencia de campaña de BITMessage llegó vacía.'), {
+      code: 'MISSING_CAMPANYA_REFERENCIA',
+      phoneSent: normalizedTelefono,
+      debugRequestId: requestId
+    });
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: 'missing-campanya-referencia',
+      decision: 'No enviado',
+      branchResult: false,
+      errorCode: error.code,
+      errorMessage: error.message,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-missing-campaign',
+      routingDecision: {
+        reason: 'missing-campanya-referencia',
+        branchResult: false,
+        decision: 'No enviado',
+        errorCode: error.code,
+        errorMessage: error.message,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(providerErrorPayload(error), 'missing-campanya-referencia');
   }
 
   try {
     const result = await sendBitmessage({
       to,
       message,
-      campanyaReferencia
+      campanyaReferencia,
+      debugRequestId: requestId
     });
 
     clearTimeout(safetyTimer);
-    return executeResponder.send(buildExecuteResponse('sent', {
+    const sfmcPayload = buildExecuteResponse('sent', {
       messageStatus: result.providerStatus || 'ENVIADO',
       providerMessageId: result.providerMessageId,
       providerOperatorCode: result.providerOperatorCode,
@@ -1087,11 +1616,65 @@ app.post('/execute', rawBodyParser, async (req, res) => {
       providerResponse: truncate(result.providerResponse),
       phoneSent: result.phoneSent,
       campaignReference: result.campaignReference,
-      sentAt: result.sentAt || new Date().toISOString()
-    }), 'bitmessage-enviado');
+      sentAt: result.sentAt || new Date().toISOString(),
+      debugRequestId: requestId
+    });
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: 'bitmessage-enviado',
+      decision: 'Enviado',
+      branchResult: sfmcPayload.branchResult,
+      messageStatus: sfmcPayload.messageStatus,
+      errorCode: sfmcPayload.errorCode,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-sent',
+      routingDecision: {
+        reason: 'bitmessage-enviado',
+        branchResult: sfmcPayload.branchResult,
+        decision: 'Enviado',
+        messageStatus: sfmcPayload.messageStatus,
+        errorCode: sfmcPayload.errorCode,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(sfmcPayload, 'bitmessage-enviado');
   } catch (error) {
     clearTimeout(safetyTimer);
-    return executeResponder.send(providerErrorPayload(error), error.code || 'bitmessage-error');
+    error.debugRequestId = requestId;
+
+    const sfmcPayload = providerErrorPayload(error);
+    sfmcPayload.debugRequestId = requestId;
+
+    debugLog('execute-decision', {
+      requestId,
+      reason: error.code || 'bitmessage-error',
+      decision: 'No enviado',
+      branchResult: sfmcPayload.branchResult,
+      messageStatus: sfmcPayload.messageStatus,
+      errorCode: sfmcPayload.errorCode,
+      errorMessage: sfmcPayload.errorMessage,
+      elapsedMs: Date.now() - executeStart
+    });
+
+    updateExecutionTrace(requestId, {
+      state: 'responded-not-sent',
+      routingDecision: {
+        reason: error.code || 'bitmessage-error',
+        branchResult: sfmcPayload.branchResult,
+        decision: 'No enviado',
+        messageStatus: sfmcPayload.messageStatus,
+        errorCode: sfmcPayload.errorCode,
+        errorMessage: sfmcPayload.errorMessage,
+        elapsedMs: Date.now() - executeStart
+      }
+    });
+
+    return executeResponder.send(sfmcPayload, error.code || 'bitmessage-error');
   }
 });
 
