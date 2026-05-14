@@ -56,3 +56,22 @@ IMPORTANTE: como cambia el tipo exacto de actividad a `RestDecision`, se recomie
 # SFMC BITMessage Custom Activity - v15 RESTDECISION doc contract
 
 Versión de diagnóstico/corrección que usa branchResult string: sent / notSent y no reescribe outcomes desde la UI.
+
+
+## Categoría visual en Journey Builder
+
+Esta versión mantiene `type: "RestDecision"` para no romper el enrutado por ramas, pero la categoría del panel izquierdo se controla con la variable:
+
+```env
+CUSTOM_ACTIVITY_CATEGORY=message
+```
+
+Valores útiles para probar en SFMC si quieres moverla de sección:
+
+```env
+CUSTOM_ACTIVITY_CATEGORY=message
+CUSTOM_ACTIVITY_CATEGORY=customer
+CUSTOM_ACTIVITY_CATEGORY=custom
+```
+
+No uses `flow` si no quieres que aparezca en Flow Control. Después de cambiar la variable, reinicia Render y crea/actualiza un componente Journey Builder Activity apuntando a `/config.json?v=18`.

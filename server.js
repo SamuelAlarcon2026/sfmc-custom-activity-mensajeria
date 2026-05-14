@@ -16,7 +16,8 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const APPLICATION_EXTENSION_KEY = process.env.APPLICATION_EXTENSION_KEY || process.env.SFMC_APPLICATION_EXTENSION_KEY || '';
-const APP_VERSION = '2026-05-13-restdecision-official-contract-v17';
+const APP_VERSION = '2026-05-13-restdecision-category-v18';
+const CUSTOM_ACTIVITY_CATEGORY = (process.env.CUSTOM_ACTIVITY_CATEGORY || 'message').trim() || 'message';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -289,6 +290,7 @@ app.get('/debug/version', (req, res) => {
     .json({
       version: APP_VERSION,
       type: 'RestDecision',
+      category: CUSTOM_ACTIVITY_CATEGORY,
       executeUseJwt: true,
       executeResponseFormat: 'top-level-json',
       routingContract: 'official-RestDecision-top-level-branchResult',
@@ -346,7 +348,7 @@ function buildConfig() {
     metaData: {
       icon: `${BASE_URL}/images/icon.svg`,
       iconSmall: `${BASE_URL}/images/icon.svg`,
-      category: 'flow',
+      category: CUSTOM_ACTIVITY_CATEGORY,
       isConfigured: false
     },
     lang: {
