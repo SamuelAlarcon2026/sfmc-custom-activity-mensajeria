@@ -255,17 +255,19 @@
     activityPayload.arguments.execute = activityPayload.arguments.execute || {};
     activityPayload.arguments.execute.inArguments = activityPayload.arguments.execute.inArguments || [];
     activityPayload.arguments.execute.outArguments = [
-      { branchResult: '' },
-      { messageStatus: '' },
-      { providerMessageId: '' },
-      { providerOperatorCode: '' },
-      { errorCode: '' },
-      { errorMessage: '' },
-      { providerResponse: '' },
-      { phoneSent: '' },
-      { campaignReference: '' },
-      { sentAt: '' },
-      { debugRequestId: '' }
+      {
+        branchResult: '',
+        messageStatus: '',
+        providerMessageId: '',
+        providerOperatorCode: '',
+        errorCode: '',
+        errorMessage: '',
+        providerResponse: '',
+        phoneSent: '',
+        campaignReference: '',
+        sentAt: '',
+        debugRequestId: ''
+      }
     ];
 
     /*
@@ -276,7 +278,7 @@
       the branches. Replacing outcomes from the UI can make JB keep routing to the
       default/first path even when /execute returns branchResult=notSent.
 
-      The canonical outcomes live in /config.json:
+      The canonical outcomes live in /config.json and /execute returns the same values inside outArguments[0]:
         branchResult=sent    -> Enviado
         branchResult=notSent -> No enviado
     */
