@@ -16,7 +16,7 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const APPLICATION_EXTENSION_KEY = process.env.APPLICATION_EXTENSION_KEY || process.env.SFMC_APPLICATION_EXTENSION_KEY || '';
-const APP_VERSION = '2026-05-13-restdecision-outarguments-envelope-v16';
+const APP_VERSION = '2026-05-13-restdecision-official-contract-v17';
 
 function numberFromEnv(value, fallbackValue) {
   const numericValue = Number(value);
@@ -288,11 +288,11 @@ app.get('/debug/version', (req, res) => {
     .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     .json({
       version: APP_VERSION,
-      type: 'RESTDECISION',
+      type: 'RestDecision',
       executeUseJwt: true,
-      executeResponseFormat: 'top-level-json-plus-outArguments-envelope',
-      routingContract: 'RESTDECISION matches outcomes against outArguments[0].branchResult; top-level fields kept for compatibility',
-      keyFix: 'execute.outArguments is a single object and /execute returns the same single-object outArguments envelope',
+      executeResponseFormat: 'top-level-json',
+      routingContract: 'official-RestDecision-top-level-branchResult',
+      keyFix: 'UI no reescribe outcomes; se dejan intactos los vínculos internos del canvas',
       branchResultValues: {
         sent: 'sent',
         notSent: 'notSent'
@@ -329,7 +329,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 function buildConfig() {
   /*
-    RESTDECISION contract used intentionally:
+    RestDecision contract used intentionally:
 
     - outcomes[].arguments.branchResult are strings.
     - /execute returns the same string at top level: { "branchResult": "sent" | "notSent" }.
@@ -342,7 +342,7 @@ function buildConfig() {
   */
   return {
     workflowApiVersion: '1.1',
-    type: 'RESTDECISION',
+    type: 'RestDecision',
     metaData: {
       icon: `${BASE_URL}/images/icon.svg`,
       iconSmall: `${BASE_URL}/images/icon.svg`,
@@ -376,19 +376,17 @@ function buildConfig() {
           { campanyaReferencia: '' }
         ],
         outArguments: [
-          {
-            branchResult: '',
-            messageStatus: '',
-            providerMessageId: '',
-            providerOperatorCode: '',
-            errorCode: '',
-            errorMessage: '',
-            providerResponse: '',
-            phoneSent: '',
-            campaignReference: '',
-            sentAt: '',
-            debugRequestId: ''
-          }
+          { branchResult: '' },
+          { messageStatus: '' },
+          { providerMessageId: '' },
+          { providerOperatorCode: '' },
+          { errorCode: '' },
+          { errorMessage: '' },
+          { providerResponse: '' },
+          { phoneSent: '' },
+          { campaignReference: '' },
+          { sentAt: '' },
+          { debugRequestId: '' }
         ],
         url: `${BASE_URL}/execute`,
         verb: 'POST',
@@ -489,52 +487,72 @@ function buildConfig() {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               messageStatus: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerMessageId: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerOperatorCode: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               errorCode: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               errorMessage: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               providerResponse: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               phoneSent: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               campaignReference: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               sentAt: {
                 dataType: 'Text',
                 direction: 'out',
                 access: 'visible'
-              },
+              }
+            },
+            {
               debugRequestId: {
                 dataType: 'Text',
                 direction: 'out',
@@ -555,12 +573,48 @@ app.get('/config.json', (req, res) => {
     .send(JSON.stringify(buildConfig(), null, 2));
 });
 
+app.get('/debug/routing-contract', (req, res) => {
+  const config = buildConfig();
+  const notSent = buildExecuteResponse('notSent', {
+    messageStatus: 'ERROR',
+    errorCode: 'TIMEOUT',
+    errorMessage: 'Ejemplo de timeout: debe ir por No enviado.',
+    phoneSent: '34644614672',
+    campaignReference: 'PRE-IBSALUT',
+    sentAt: new Date().toISOString(),
+    debugRequestId: 'sample-timeout'
+  });
+  const sent = buildExecuteResponse('sent', {
+    messageStatus: 'ENVIADO',
+    providerMessageId: 'sample-id',
+    providerOperatorCode: 'sample-operator-code',
+    phoneSent: '34644614672',
+    campaignReference: 'PRE-IBSALUT',
+    sentAt: new Date().toISOString(),
+    debugRequestId: 'sample-sent'
+  });
+
+  res
+    .type('application/json')
+    .set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    .json({
+      version: APP_VERSION,
+      type: config.type,
+      officialContract: 'RestDecision + outcomes[].arguments.branchResult + execute response { branchResult: value }',
+      outcomes: config.outcomes,
+      executeUseJwt: config.arguments.execute.useJwt,
+      executeUrl: config.arguments.execute.url,
+      expectedTimeoutResponse: notSent,
+      expectedSentResponse: sent
+    });
+});
+
 app.get('/debug/config', (req, res) => {
   res
     .type('text/plain')
     .send([
       `APP_VERSION=${APP_VERSION}`,
-      `activity.type=RESTDECISION`,
+      `activity.type=RestDecision`,
       `routing.outcomeLabels=Enviado,No enviado`,
       `routing.branchResult.sent=sent`,
       `routing.branchResult.notSent=notSent`,
@@ -568,8 +622,7 @@ app.get('/debug/config', (req, res) => {
       `configModal.url=${BASE_URL}/index.html`,
       `execute.url=${BASE_URL}/execute`,
       `execute.useJwt=true`,
-      `execute.responseFormat=top-level-json-plus-outArguments-envelope branchResult=sent|notSent`,
-      `execute.outArguments.shape=single-object`,
+      `execute.responseFormat=top-level-json branchResult=sent|notSent`,
       `applicationExtensionKey.configured=${Boolean(APPLICATION_EXTENSION_KEY)}`,
       `provider=BITMessage Fundacio BIT`,
       `sfmc.executeTimeoutMs=${SFMC_EXECUTE_TIMEOUT_MS}`,
@@ -886,16 +939,13 @@ function buildExecuteResponse(branchResult, values = {}) {
     sent    => Enviado
     notSent => No enviado
 
-    The important piece for RESTDECISION is the outArguments envelope:
-      { "outArguments": [ { "branchResult": "notSent" } ] }
-
-    We also keep the same fields at top level for compatibility/debugging, but
-    Journey Builder should use outArguments[0].branchResult for the outcome match.
+    No boolean, no numeric values. Journey Builder compares this string against
+    outcomes[].arguments.branchResult.
   */
   const routingKey = normalizeRoutingKey(branchResult);
   const branchResultValue = routingKey === 'sent' ? 'sent' : 'notSent';
 
-  const outArgument = {
+  return {
     branchResult: branchResultValue,
     messageStatus: values.messageStatus || (routingKey === 'sent' ? 'ENVIADO' : 'ERROR'),
     providerMessageId: values.providerMessageId || '',
@@ -908,13 +958,6 @@ function buildExecuteResponse(branchResult, values = {}) {
     sentAt: values.sentAt || new Date().toISOString(),
     debugRequestId: values.debugRequestId || ''
   };
-
-  return {
-    ...outArgument,
-    outArguments: [
-      outArgument
-    ]
-  };
 }
 
 function sendExecuteResponse(res, payload, reason = '') {
@@ -924,7 +967,7 @@ function sendExecuteResponse(res, payload, reason = '') {
 
   const debugSummary = {
     appVersion: APP_VERSION,
-    responseFormat: 'top-level-json-plus-outArguments-envelope-v16',
+    responseFormat: 'official-restdecision-top-level-json',
     httpStatusReturnedToSfmc: 200,
     contentTypeReturnedToSfmc: 'application/json',
     branchResult: responsePayload.branchResult,
