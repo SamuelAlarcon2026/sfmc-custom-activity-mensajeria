@@ -75,3 +75,8 @@ CUSTOM_ACTIVITY_CATEGORY=custom
 ```
 
 No uses `flow` si no quieres que aparezca en Flow Control. Después de cambiar la variable, reinicia Render y crea/actualiza un componente Journey Builder Activity apuntando a `/config.json?v=18`.
+
+
+## Icono personalizado v19
+
+Esta versión usa `public/images/icon.png` como icono de la actividad en Journey Builder y en la interfaz de configuración. El routing se mantiene como `RestDecision` con `branchResult=sent/notSent`.
