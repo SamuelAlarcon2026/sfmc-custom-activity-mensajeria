@@ -1,0 +1,253 @@
+html,
+body {
+  min-height: 100%;
+  background: #f3f2f2;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.asset-table {
+  max-height: 340px;
+  border: 1px solid #dddbda;
+}
+
+.mapping-table th,
+.mapping-table td {
+  vertical-align: top;
+}
+
+.preview-frame {
+  display: block;
+  min-height: 520px;
+  border: 1px solid #dddbda;
+  background: #fff;
+  color-scheme: light;
+}
+
+.preview-frame.desktop {
+  width: 100%;
+}
+
+.preview-frame.mobile {
+  width: 390px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.local-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: .75rem 0;
+  background: #f3f2f2;
+  border-top: 1px solid #dddbda;
+}
+
+.slds-align-bottom {
+  align-self: end;
+}
+
+code {
+  padding: .1rem .25rem;
+  border-radius: .2rem;
+  background: #ecebea;
+}
+
+.preview-surface {
+  display: block;
+  min-height: 520px;
+  border: 1px solid #dddbda;
+  background: #fff;
+  overflow: auto;
+}
+
+.preview-surface.desktop {
+  width: 100%;
+}
+
+.preview-surface.mobile {
+  width: 390px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.preview-raw {
+  min-height: 240px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+}
+
+
+.preview-frame-shell {
+  width: 100%;
+  min-height: 560px;
+  border: 1px solid #dddbda;
+  background: #fff;
+  overflow: auto;
+}
+
+.preview-frame-shell.mobile {
+  max-width: 430px;
+  margin: 0 auto;
+}
+
+.preview-frame {
+  display: block;
+  width: 100%;
+  height: 560px;
+  min-height: 560px;
+  border: 0;
+  background: #fff;
+}
+
+.preview-frame.mobile {
+  width: 390px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.preview-grid {
+  row-gap: 1rem;
+}
+
+
+.schema-field-select {
+  min-width: 240px;
+}
+
+.mapping-table select,
+.mapping-table input {
+  min-width: 220px;
+}
+
+
+/* v18: responsive mapping UI */
+.mapping-help {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.mapping-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 100%;
+}
+
+.mapping-card {
+  max-width: 100%;
+  overflow: visible;
+  border-color: #dddbda;
+}
+
+.mapping-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #dddbda;
+  padding-bottom: 0.5rem;
+}
+
+.mapping-required {
+  white-space: nowrap;
+}
+
+.mapping-card .slds-select,
+.mapping-card .slds-input {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.mapping-field-select {
+  width: 100%;
+}
+
+.mapping-expression-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.75rem;
+}
+
+.mapping-expression-preview {
+  margin-top: 0.25rem;
+  color: #706e6b;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .mapping-card__header {
+    flex-direction: column;
+  }
+}
+
+
+/* v18: fix Journey Builder modal overflow caused by long schema expressions */
+#app,
+.app-shell,
+#activity-form {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.slds-card,
+.slds-card__body,
+.slds-card__body_inner {
+  max-width: 100%;
+}
+
+.mapping-list,
+.mapping-card,
+.mapping-card .slds-grid,
+.mapping-card .slds-col,
+.mapping-card .slds-form-element,
+.mapping-card .slds-form-element__control {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mapping-card {
+  overflow: hidden;
+}
+
+.mapping-card .slds-select,
+.mapping-card .slds-input,
+.schema-field-select,
+.mapping-field-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.mapping-expression-input {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-expression-preview {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#recipient-field-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .mapping-card .slds-large-size_1-of-4,
+  .mapping-card .slds-large-size_3-of-4 {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+

@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: sfmc-custom-activity-mensajeria-email
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_BASE_URL
+        value: https://sfmc-custom-activity-mensajeria-email.onrender.com
+      - key: SFMC_CLIENT_ID
+        sync: false
+      - key: SFMC_CLIENT_SECRET
+        sync: false
+      - key: SFMC_AUTH_BASE_URL
+        sync: false
+      - key: SFMC_REST_BASE_URL
+        sync: false
+      - key: RELAY_PROVIDER
+        value: microsoft-graph
+      - key: RELAY_AUTH_URL
+        sync: false
+      - key: RELAY_CLIENT_ID
+        sync: false
+      - key: RELAY_CLIENT_SECRET
+        sync: false
+      - key: RELAY_SCOPE
+        value: https://graph.microsoft.com/.default
+      - key: RELAY_API_URL
+        sync: false
+      - key: RELAY_GRAPH_SAVE_TO_SENT_ITEMS
+        value: "true"
+      - key: RELAY_TIMEOUT_MS
+        value: "15000"
