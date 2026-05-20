@@ -1,28 +1,21 @@
 {
-  "name": "sfmc-custom-activity-mensajeria-email",
+  "name": "sfmc-bitmessage-custom-activity",
   "version": "1.0.0",
-  "description": "Salesforce Marketing Cloud Journey Builder Custom Activity para enviar emails mediante relay privado.",
+  "description": "Salesforce Marketing Cloud Journey Builder Custom Activity para envío de SMS mediante BITMessage/Fundació BIT con ramas Enviado/No enviado.",
+  "type": "module",
   "main": "server.js",
-  "type": "commonjs",
-  "engines": {
-    "node": "20.x"
-  },
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "check": "node --check server.js"
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "@salesforce-ux/design-system": "^2.24.6",
-    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0",
-    "helmet": "^8.0.0",
-    "morgan": "^1.10.0",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "postmonger": "^0.0.16"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.9"
-  }
+  "devDependencies": {}
 }

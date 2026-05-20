@@ -2,15 +2,57 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Email por relay privado</title>
-  <link rel="stylesheet" href="/slds/styles/salesforce-lightning-design-system.min.css">
-  <link rel="stylesheet" href="/app/styles.css?v=graph-relay-v19">
+  <title>BitMessage</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="slds-scope">
-  <div id="app" class="app-shell"><div class="slds-p-around_medium">Cargando configuración...</div></div>
+<body>
+  <main class="container">
+    <header class="header">
+      <img src="/images/icon.png?v=19" alt="" class="icon">
+      <div>
+        <h1>BitMessage</h1>
+        <p>Configura el SMS que se enviará mediante BITMessage / Fundació BIT.</p>
+      </div>
+    </header>
 
-  <script src="/vendor/postmonger.js?v=graph-relay-v19"></script>
-  <script src="/app/main.js?v=graph-relay-v19"></script>
+    <section class="panel">
+      <label for="recipientField">Campo destino/teléfono de la Data Extension de entrada</label>
+      <select id="recipientField">
+        <option value="">Cargando campos...</option>
+      </select>
+      <p class="help">Solo se muestran campos del esquema de entrada expuesto por Journey Builder para esta Journey. El teléfono se normaliza antes de enviarse: 654123123 → 34654123123; +33123456789 → 0033123456789.</p>
+    </section>
+
+    <section class="panel">
+      <label for="campaignReference">Referencia de campaña BITMessage</label>
+      <input id="campaignReference" type="text" placeholder="Ejemplo: SOIB, PRUEBA-IBSALUT">
+      <p class="help">Valor que se enviará en el campo <code>campanyaReferencia</code>. Debe existir en BITMessage.</p>
+    </section>
+
+    <section class="panel">
+      <div class="messageHeader">
+        <label for="message">Mensaje</label>
+        <span id="charCount">0 caracteres</span>
+      </div>
+      <textarea id="message" rows="8" placeholder="Ejemplo: Hola {{Event.MiEntrada.Nombre}}, tu cita está confirmada."></textarea>
+      <p class="help">Haz clic en una variable para insertarla en el texto.</p>
+    </section>
+
+    <section class="panel">
+      <div class="variablesHeader">
+        <h2>Variables disponibles</h2>
+        <input id="fieldSearch" type="search" placeholder="Buscar campo...">
+      </div>
+      <div id="fieldList" class="fieldList">
+        <p class="empty">Cargando variables desde Journey Builder...</p>
+      </div>
+    </section>
+
+    <section id="errors" class="errors hidden"></section>
+  </main>
+
+  <script src="/vendor/postmonger.js"></script>
+  <script src="/customActivity.js"></script>
 </body>
 </html>
